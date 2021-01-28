@@ -1,53 +1,4 @@
-<!DOCTYPE html>
-<html lang="en"><head>
-  <meta charset="utf-8">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.7.1 -->
-<title>Structured Prediction Pt. 1 - Linear-chain CRF | Ramblings</title>
-<meta name="generator" content="Jekyll v4.2.0" />
-<meta property="og:title" content="Structured Prediction Pt. 1 - Linear-chain CRF" />
-<meta property="og:locale" content="en_US" />
-<meta name="description" content="Dunno know what to write here except trans women are women and BLM should not be a discussion." />
-<meta property="og:description" content="Dunno know what to write here except trans women are women and BLM should not be a discussion." />
-<link rel="canonical" href="/jekyll/update/2021/01/25/crfpt1.html" />
-<meta property="og:url" content="/jekyll/update/2021/01/25/crfpt1.html" />
-<meta property="og:site_name" content="Ramblings" />
-<meta property="og:type" content="article" />
-<meta property="article:published_time" content="2021-01-25T13:09:17-05:00" />
-<meta name="twitter:card" content="summary" />
-<meta property="twitter:title" content="Structured Prediction Pt. 1 - Linear-chain CRF" />
-<script type="application/ld+json">
-{"headline":"Structured Prediction Pt. 1 - Linear-chain CRF","dateModified":"2021-01-25T13:09:17-05:00","datePublished":"2021-01-25T13:09:17-05:00","url":"/jekyll/update/2021/01/25/crfpt1.html","mainEntityOfPage":{"@type":"WebPage","@id":"/jekyll/update/2021/01/25/crfpt1.html"},"description":"Dunno know what to write here except trans women are women and BLM should not be a discussion.","@type":"BlogPosting","@context":"https://schema.org"}</script>
-<!-- End Jekyll SEO tag -->
-<link rel="stylesheet" href="/assets/main.css"><link type="application/atom+xml" rel="alternate" href="/feed.xml" title="Ramblings" /></head>
-<body><header class="site-header" role="banner">
-
-  <div class="wrapper"><a class="site-title" rel="author" href="/">Ramblings</a><nav class="site-nav">
-        <input type="checkbox" id="nav-trigger" class="nav-trigger" />
-        <label for="nav-trigger">
-          <span class="menu-icon">
-            <svg viewBox="0 0 18 15" width="18px" height="15px">
-              <path d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.032C17.335,0,18,0.665,18,1.484L18,1.484z M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.032C17.335,6.031,18,6.696,18,7.516L18,7.516z M18,13.516C18,14.335,17.335,15,16.516,15H1.484 C0.665,15,0,14.335,0,13.516l0,0c0-0.82,0.665-1.483,1.484-1.483h15.032C17.335,12.031,18,12.695,18,13.516L18,13.516z"/>
-            </svg>
-          </span>
-        </label>
-
-        <div class="trigger"><a class="page-link" href="/about/">About</a></div>
-      </nav></div>
-</header>
-<main class="page-content" aria-label="Content">
-      <div class="wrapper">
-        <article class="post h-entry" itemscope itemtype="http://schema.org/BlogPosting">
-
-  <header class="post-header">
-    <h1 class="post-title p-name" itemprop="name headline">Structured Prediction Pt. 1 - Linear-chain CRF</h1>
-    <p class="post-meta">
-      <time class="dt-published" datetime="2021-01-25T13:09:17-05:00" itemprop="datePublished">Jan 25, 2021
-      </time></p>
-  </header>
-
-  <div class="post-content e-content" itemprop="articleBody">
-    <script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+I"[<script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
 
 <p>You’re looking at part 1 of a series of posts about <em>structured prediction with conditional random fields</em>. In this post, we’ll talk about linear-chain
 CRFs applied to POS tagging. It will cover the necessary background to understand the motivation behind using a CRF,
@@ -69,11 +20,13 @@ jointly decode the sequence, keeping into account dependencies among the labels.
 <h2 id="structured-prediction">Structured Prediction</h2>
 <p>Structured prediction is a framework for solving problems of classification or regression in which the output variables
 are mutually dependent or constrained. It can be seen as a subset of prediction where we make use of the structure in
-the output space. The loss function used in structured prediction problems considers the outputs as a whole.</p>
+the output space. The loss function used in structured prediction problems considers the outputs as a whole, meaning in
+the example above the loss of a sequence that has a <code class="language-plaintext highlighter-rouge">verb</code> following a <code class="language-plaintext highlighter-rouge">determiner</code> will be higher than a sequence where
+ a <code class="language-plaintext highlighter-rouge">noun</code> follows a <code class="language-plaintext highlighter-rouge">determiner</code>.</p>
 
 <p>Let’s denote the input sequence of words by \(\mathbf{x}\), the output space (i.e., the set of all possible target sequences) 
 by \(\mathcal{Y}\) and \(f(\mathbf{x}, \mathbf{y})\) some function that expresses how well \(\mathbf{x}\) fits 
-\(\mathbf{y}\) (we will clarify what this function is later), then prediction can be denoted by the following equation:</p>
+\(\mathbf{y}\) (we will clarify what this function is later), then prediction can be denoted by the following formula:</p>
 
 \[\mathbf{y}^{\star} = arg \max_{\mathbf{y} \in \mathcal{Y}} f(\mathbf{x}, \mathbf{y})\]
 
@@ -138,10 +91,9 @@ depend on both the previously predicted tag \(y_{i-1}\) and the input sequence o
 p(\mathbf{y} \mid \mathbf{x}) &amp;= \frac{1}{Z(\mathbf{x})} \prod_{t=1}^{m} \psi(y_t, \mathbf{x}, t) \prod_{t=1}^{m-1}\psi(y_t, y_{t+1}) \\
  \end{aligned}\]
 
-<p>Additionally, what makes a CRF a CRF is that it’s simply a specific way of choosing the factors, or in other
-words feature functions. The CRF-way of defining the factors is taking an exponential of a linear combination of 
-real-valued feature functions \(f(\cdot)\) with parameters \(\boldsymbol{\theta}_1\) and \(\boldsymbol{\theta}_2\). You’ll
-see in the following that the feature functions and parameters are shared over timesteps:</p>
+<p>Additionally, what you need to know about a CRF is that it’s simply a specific way of choosing the factors, or in other
+words feature functions. The CRF-way of defining the factors is taking an exponential and a linear combination of 
+real-valued feature functions \(f(\cdot)\) with parameters \(\boldsymbol{\theta}_1\) and \(\boldsymbol{\theta}_2\):</p>
 
 \[\begin{aligned}
 p(\mathbf{y} \mid \mathbf{x}) &amp;= \frac{1}{Z(\mathbf{x})} \prod_{t=1}^{m} \exp\left(\boldsymbol{\theta}_1 \cdot f(y_t, \mathbf{x}, t)\right)\prod_{t=1}^{m-1} \exp\left(\boldsymbol{\theta}_2 \cdot f(y_t, y_{t+1})\right) \\ 
@@ -160,26 +112,26 @@ descent over the likelihood will require computing the factors from the PGM, whi
 inference methods like belief propagation. Let’s take a look at the log-likelihood:</p>
 
 \[\begin{aligned}
-\log \mathcal{L}(\boldsymbol{\theta}) &amp;= \log{\prod_{i=1}^N p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}, \boldsymbol{\theta}) } =  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})}\prod_{t=1}^m \psi (y_t^{(i)}, \mathbf{x}_t^{(i)}, t) \prod_{t=1}^{m-1} \psi (y_t^{(i)}, y_{t+1}^{(i)}) \Bigg]} \\
-    &amp;=  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} \\
-    &amp;= \log{\Bigg[\prod_{i=1}^N \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} + \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \Bigg]} \\
-    &amp;= \sum_{i=1}^{N}\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)}) - \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) \\
+\log \mathcal{L}(\boldsymbol{\theta}) &amp;= \log{\prod_{i=1}^N p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}, \boldsymbol{\theta}) } =  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})}\prod_{t=1}^m \psi_t (y_t^{(i)}, \mathbf{x}_t^{(i)}, t) \prod_{t=1}^{m-1} \psi_t (y_t^{(i)}, y_{t+1}^{(i)}) \Bigg]} \\
+    &amp;=  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f_t(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} \\
+    &amp;= \log{\Bigg[\prod_{i=1}^N \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f_t(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} + \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \Bigg]} \\
+    &amp;= \sum_{i=1}^{N}\sum_{t=1}^m \boldsymbol{\theta}_1 f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f_t(y_t^{(i)}, y_{t+1}^{(i)}) - \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) \\
 \end{aligned}\]
 
 <p>To optimize the parameters, we need to calculate the gradients of the log-likelihood w.r.t. the parameters:</p>
 
 \[\begin{aligned}
-\nabla_{\boldsymbol{\theta}_1} \log \mathcal{L}(\boldsymbol{\theta}) &amp;= \sum_{i=1}^{N}\sum_{t=1}^m f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) - \sum_{i=1}^N \nabla_{\boldsymbol{\theta}_1} \log(Z(\mathbf{x}^{(i)}))  \\
+\nabla_{\boldsymbol{\theta}_1} \log \mathcal{L}(\boldsymbol{\theta}) &amp;= \sum_{i=1}^{N}\sum_{t=1}^m f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) - \sum_{i=1}^N \nabla_{\boldsymbol{\theta}_1} \log(Z(\mathbf{x}^{(i)}))  \\
 \nabla_{\boldsymbol{\theta}_1} \log(Z(\mathbf{x}^{(i)})) &amp;= \frac{\nabla_{\boldsymbol{\theta}_1}Z(\mathbf{x}^{(i)})}{Z(\mathbf{x}^{(i)})} \\
-&amp;= \frac{\sum_{\mathbf{y}^{\prime}}\exp\left(\sum_{t=1}^m \boldsymbol{\theta}_1 \cdot f(y^{\prime(i)}_t, \mathbf{x}^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 \cdot f(y^{\prime(i)}_t, y^{\prime(i)}_{t+1})\right) \cdot \sum_{t=1}^m f(y_t^{\prime(i)},\mathbf{x}^{(i)},t)}{Z(\mathbf{x}^{(i)})} \\
-&amp;= \sum_{t=1}^m\sum_{y_1^{\prime}}\dots\sum_{y_m^{\prime}} p(\mathbf{y}^{\prime} \mid \mathbf{x})  \cdot f(y_t^{\prime},\mathbf{x},t) \\
-&amp;= \sum_{t=1}^m\sum_{y^{\prime}_t} p(y^{\prime}_t \mid \mathbf{x})  \cdot f(y_t^{\prime},\mathbf{x},t)
+&amp;= \frac{\sum_{\mathbf{y}^{\prime}}\exp\left(\sum_{t=1}^m \boldsymbol{\theta}_1 \cdot f(y^{\prime}_t, \mathbf{x}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 \cdot f(y^{\prime}_t, y^{\prime}_{t+1})\right) \cdot f(y_t^{\prime},\mathbf{x},t)}{Z(\mathbf{x}^{(i)})} \\
+&amp;= \sum_{y_1^{\prime}}\dots\sum_{y_m^{\prime}} p(\mathbf{y} \mid \mathbf{x})  \cdot f(y_t^{\prime},\mathbf{x},t) \\
+&amp;= \sum_{y^{\prime}_t} p(y_t \mid \mathbf{x})  \cdot f(y_t^{\prime},\mathbf{x},t)
 \end{aligned}\]
 
 <p>Where the last step is true because we simply marginalize out all \(y_i\)’s for which \(i \neq t\). Similarly for the gradient w.r.t. \(\boldsymbol{\theta}_2\):</p>
 
 \[\begin{aligned}
-\nabla_{\boldsymbol{\theta}_2} \log \mathcal{L}(\boldsymbol{\theta}) &amp;= \sum_{t=1}^m\sum_{y^{\prime}_t}\sum_{y^{\prime}_{t+1}} p(y^{\prime}_t,y^{\prime}_{t+1} \mid \mathbf{x})  \cdot f(y_t^{\prime},y_{t+1}^{\prime})
+\nabla_{\boldsymbol{\theta}_2} \log \mathcal{L}(\boldsymbol{\theta}) &amp;= \sum_{y^{\prime}_t}\sum_{y^{\prime}_{t+1}} p(y_t,y_{t+1} \mid \mathbf{x})  \cdot f(y_t^{\prime},y_{t+1}^{\prime})
 \end{aligned}\]
 
 <p>This shows that for the backward pass over the CRF computations we need the marginals \(p(y_t \mid \mathbf{x})\) and \(p(y_t,y_{t+1} \mid \mathbf{x})\),
@@ -194,11 +146,8 @@ computing the partition function down to polynomial time. Additionally, to calcu
   use it to calculate the partition function.</p>
 
 <p>Recall that, if done naively, the complexity of computing the
- partition function is \(|S|^m\). With some dynamic programming magic we can get this down to \(m \cdot |S|^2\).
- Before I knew dynamic programming the term always sounded difficult to me, but it really is just nothing other than re-using
- stuff you already computed before. E.g., if you have a function that calculates \(n!\) and it’s called more often
- than once you can store the computations and re-use them when the function is called again.
- How BP works can be illustrated well when we write out the sums and products in the partition function 
+ partition function is \(|S|^m\). With some dynamic programming magic we can get this down to \(m \cdot |S|^2\). 
+ How this works can be illustrated well when we write out the sums in the partition function 
  (for the sake of this illustration we will use the factors \(\psi(\cdot)\) again):</p>
 
 \[\begin{aligned}
@@ -250,7 +199,7 @@ p(y_t, y_{t+1} \mid \mathbf{x}) &amp;= \sum_{y_1}\dots\sum_{y_{t-1}}\sum_{y_{t+2
 \end{aligned}\]
 
 <p>In the previous we saw how to compute this sum if we were to sum over all \(y_t\)’s, but we can also
-use it to compute the marginals. To this end, we first do the exact same
+use it also to compute the marginals. To this end, we first do the exact same
 as before to calculate the partition function, but rearranging the sums in a different way:</p>
 
 \[\begin{aligned}
@@ -264,7 +213,7 @@ Z(\mathbf{x}) &amp;= \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1)\sum_{y
 
 <p>We can calculate the rightmost column as follows:</p>
 
-\[\beta(m, y^{\prime}_{m-1}) = \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot  \psi(y^{\prime}_{m}, y^{\prime}_{m-1})\]
+\[\beta(m, y^{\prime}_{m-1}) = \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot  \psi(y^{\prime}_{m}, y^{\prime}_{m-2})\]
 
 <p>Then, going backward from timestep \(m-1\) to timestep 2, we can compute the following recursion:</p>
 
@@ -311,35 +260,4 @@ This amounts to solving the following equation:</p>
 <em>Charles Sutton and Andrew McCallum. An introduction to conditional random fields. Found.Trends Mach. Learn., 4(4):267–373, April 2012.</em></p>
 
 <p>Hugo Larochelle’s <a href="https://www.youtube.com/watch?v=GF3iSJkgPbA" target="_blank">tutorial on YouTube</a>. Clearest explanation to be found about CRFs afaik!</p>
-
-  </div><a class="u-url" href="/jekyll/update/2021/01/25/crfpt1.html" hidden></a>
-</article>
-
-      </div>
-    </main><footer class="site-footer h-card">
-  <data class="u-url" href="/"></data>
-
-  <div class="wrapper">
-
-    <h2 class="footer-heading">Ramblings</h2>
-
-    <div class="footer-col-wrapper">
-      <div class="footer-col footer-col-1">
-        <ul class="contact-list">
-          <li class="p-name">Ramblings</li><li><a class="u-email" href="mailto:lauraruis92 at gmail dot com">lauraruis92 at gmail dot com</a></li></ul>
-      </div>
-
-      <div class="footer-col footer-col-2"><ul class="social-media-list"><li><a href="https://github.com/LauraRuis"><svg class="svg-icon"><use xlink:href="/assets/minima-social-icons.svg#github"></use></svg> <span class="username">LauraRuis</span></a></li><li><a href="https://www.twitter.com/lauraruis"><svg class="svg-icon"><use xlink:href="/assets/minima-social-icons.svg#twitter"></use></svg> <span class="username">lauraruis</span></a></li></ul>
-</div>
-
-      <div class="footer-col footer-col-3">
-        <p>Dunno know what to write here except trans women are women and BLM should not be a discussion.</p>
-      </div>
-    </div>
-
-  </div>
-
-</footer>
-</body>
-
-</html>
+:ET

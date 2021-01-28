@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2021-01-27T20:18:10-05:00</updated><id>/feed.xml</id><title type="html">Ramblings</title><subtitle>Hoi</subtitle><entry><title type="html">Structured Prediction Pt. 1 - Linear-chain CRF</title><link href="/jekyll/update/2021/01/25/crfpt1.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 1 - Linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/jekyll/update/2021/01/25/crfpt1</id><content type="html" xml:base="/jekyll/update/2021/01/25/crfpt1.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2021-01-28T17:45:26-05:00</updated><id>/feed.xml</id><title type="html">Ramblings</title><subtitle>Dunno know what to write here except trans women are women and BLM should not be a discussion.</subtitle><entry><title type="html">Structured Prediction Pt. 1 - Linear-chain CRF</title><link href="/jekyll/update/2021/01/25/crfpt1.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 1 - Linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/jekyll/update/2021/01/25/crfpt1</id><content type="html" xml:base="/jekyll/update/2021/01/25/crfpt1.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
 
 &lt;p&gt;You’re looking at part 1 of a series of posts about &lt;em&gt;structured prediction with conditional random fields&lt;/em&gt;. In this post, we’ll talk about linear-chain
 CRFs applied to POS tagging. It will cover the necessary background to understand the motivation behind using a CRF,
@@ -20,13 +20,11 @@ jointly decode the sequence, keeping into account dependencies among the labels.
 &lt;h2 id=&quot;structured-prediction&quot;&gt;Structured Prediction&lt;/h2&gt;
 &lt;p&gt;Structured prediction is a framework for solving problems of classification or regression in which the output variables
 are mutually dependent or constrained. It can be seen as a subset of prediction where we make use of the structure in
-the output space. The loss function used in structured prediction problems considers the outputs as a whole, meaning in
-the example above the loss of a sequence that has a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;verb&lt;/code&gt; following a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;determiner&lt;/code&gt; will be higher than a sequence where
- a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;noun&lt;/code&gt; follows a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;determiner&lt;/code&gt;.&lt;/p&gt;
+the output space. The loss function used in structured prediction problems considers the outputs as a whole.&lt;/p&gt;
 
 &lt;p&gt;Let’s denote the input sequence of words by \(\mathbf{x}\), the output space (i.e., the set of all possible target sequences) 
 by \(\mathcal{Y}\) and \(f(\mathbf{x}, \mathbf{y})\) some function that expresses how well \(\mathbf{x}\) fits 
-\(\mathbf{y}\) (we will clarify what this function is later), then prediction can be denoted by the following formula:&lt;/p&gt;
+\(\mathbf{y}\) (we will clarify what this function is later), then prediction can be denoted by the following equation:&lt;/p&gt;
 
 \[\mathbf{y}^{\star} = arg \max_{\mathbf{y} \in \mathcal{Y}} f(\mathbf{x}, \mathbf{y})\]
 
@@ -91,9 +89,10 @@ depend on both the previously predicted tag \(y_{i-1}\) and the input sequence o
 p(\mathbf{y} \mid \mathbf{x}) &amp;amp;= \frac{1}{Z(\mathbf{x})} \prod_{t=1}^{m} \psi(y_t, \mathbf{x}, t) \prod_{t=1}^{m-1}\psi(y_t, y_{t+1}) \\
  \end{aligned}\]
 
-&lt;p&gt;Additionally, what you need to know about a CRF is that it’s simply a specific way of choosing the factors, or in other
-words feature functions. The CRF-way of defining the factors is taking an exponential and a linear combination of 
-real-valued feature functions \(f(\cdot)\) with parameters \(\boldsymbol{\theta}_1\) and \(\boldsymbol{\theta}_2\):&lt;/p&gt;
+&lt;p&gt;Additionally, what makes a CRF a CRF is that it’s simply a specific way of choosing the factors, or in other
+words feature functions. The CRF-way of defining the factors is taking an exponential of a linear combination of 
+real-valued feature functions \(f(\cdot)\) with parameters \(\boldsymbol{\theta}_1\) and \(\boldsymbol{\theta}_2\). You’ll
+see in the following that the feature functions and parameters are shared over timesteps:&lt;/p&gt;
 
 \[\begin{aligned}
 p(\mathbf{y} \mid \mathbf{x}) &amp;amp;= \frac{1}{Z(\mathbf{x})} \prod_{t=1}^{m} \exp\left(\boldsymbol{\theta}_1 \cdot f(y_t, \mathbf{x}, t)\right)\prod_{t=1}^{m-1} \exp\left(\boldsymbol{\theta}_2 \cdot f(y_t, y_{t+1})\right) \\ 
@@ -112,26 +111,26 @@ descent over the likelihood will require computing the factors from the PGM, whi
 inference methods like belief propagation. Let’s take a look at the log-likelihood:&lt;/p&gt;
 
 \[\begin{aligned}
-\log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= \log{\prod_{i=1}^N p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}, \boldsymbol{\theta}) } =  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})}\prod_{t=1}^m \psi_t (y_t^{(i)}, \mathbf{x}_t^{(i)}, t) \prod_{t=1}^{m-1} \psi_t (y_t^{(i)}, y_{t+1}^{(i)}) \Bigg]} \\
-    &amp;amp;=  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f_t(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} \\
-    &amp;amp;= \log{\Bigg[\prod_{i=1}^N \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f_t(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} + \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \Bigg]} \\
-    &amp;amp;= \sum_{i=1}^{N}\sum_{t=1}^m \boldsymbol{\theta}_1 f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f_t(y_t^{(i)}, y_{t+1}^{(i)}) - \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) \\
+\log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= \log{\prod_{i=1}^N p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}, \boldsymbol{\theta}) } =  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})}\prod_{t=1}^m \psi (y_t^{(i)}, \mathbf{x}_t^{(i)}, t) \prod_{t=1}^{m-1} \psi (y_t^{(i)}, y_{t+1}^{(i)}) \Bigg]} \\
+    &amp;amp;=  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} \\
+    &amp;amp;= \log{\Bigg[\prod_{i=1}^N \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} + \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \Bigg]} \\
+    &amp;amp;= \sum_{i=1}^{N}\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)}) - \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) \\
 \end{aligned}\]
 
 &lt;p&gt;To optimize the parameters, we need to calculate the gradients of the log-likelihood w.r.t. the parameters:&lt;/p&gt;
 
 \[\begin{aligned}
-\nabla_{\boldsymbol{\theta}_1} \log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= \sum_{i=1}^{N}\sum_{t=1}^m f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) - \sum_{i=1}^N \nabla_{\boldsymbol{\theta}_1} \log(Z(\mathbf{x}^{(i)}))  \\
+\nabla_{\boldsymbol{\theta}_1} \log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= \sum_{i=1}^{N}\sum_{t=1}^m f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) - \sum_{i=1}^N \nabla_{\boldsymbol{\theta}_1} \log(Z(\mathbf{x}^{(i)}))  \\
 \nabla_{\boldsymbol{\theta}_1} \log(Z(\mathbf{x}^{(i)})) &amp;amp;= \frac{\nabla_{\boldsymbol{\theta}_1}Z(\mathbf{x}^{(i)})}{Z(\mathbf{x}^{(i)})} \\
-&amp;amp;= \frac{\sum_{\mathbf{y}^{\prime}}\exp\left(\sum_{t=1}^m \boldsymbol{\theta}_1 \cdot f(y^{\prime}_t, \mathbf{x}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 \cdot f(y^{\prime}_t, y^{\prime}_{t+1})\right) \cdot f(y_t^{\prime},\mathbf{x},t)}{Z(\mathbf{x}^{(i)})} \\
-&amp;amp;= \sum_{y_1^{\prime}}\dots\sum_{y_m^{\prime}} p(\mathbf{y} \mid \mathbf{x})  \cdot f(y_t^{\prime},\mathbf{x},t) \\
-&amp;amp;= \sum_{y^{\prime}_t} p(y_t \mid \mathbf{x})  \cdot f(y_t^{\prime},\mathbf{x},t)
+&amp;amp;= \frac{\sum_{\mathbf{y}^{\prime}}\exp\left(\sum_{t=1}^m \boldsymbol{\theta}_1 \cdot f(y^{\prime(i)}_t, \mathbf{x}^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 \cdot f(y^{\prime(i)}_t, y^{\prime(i)}_{t+1})\right) \cdot \sum_{t=1}^m f(y_t^{\prime(i)},\mathbf{x}^{(i)},t)}{Z(\mathbf{x}^{(i)})} \\
+&amp;amp;= \sum_{t=1}^m\sum_{y_1^{\prime}}\dots\sum_{y_m^{\prime}} p(\mathbf{y}^{\prime} \mid \mathbf{x})  \cdot f(y_t^{\prime},\mathbf{x},t) \\
+&amp;amp;= \sum_{t=1}^m\sum_{y^{\prime}_t} p(y^{\prime}_t \mid \mathbf{x})  \cdot f(y_t^{\prime},\mathbf{x},t)
 \end{aligned}\]
 
 &lt;p&gt;Where the last step is true because we simply marginalize out all \(y_i\)’s for which \(i \neq t\). Similarly for the gradient w.r.t. \(\boldsymbol{\theta}_2\):&lt;/p&gt;
 
 \[\begin{aligned}
-\nabla_{\boldsymbol{\theta}_2} \log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= \sum_{y^{\prime}_t}\sum_{y^{\prime}_{t+1}} p(y_t,y_{t+1} \mid \mathbf{x})  \cdot f(y_t^{\prime},y_{t+1}^{\prime})
+\nabla_{\boldsymbol{\theta}_2} \log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= \sum_{t=1}^m\sum_{y^{\prime}_t}\sum_{y^{\prime}_{t+1}} p(y^{\prime}_t,y^{\prime}_{t+1} \mid \mathbf{x})  \cdot f(y_t^{\prime},y_{t+1}^{\prime})
 \end{aligned}\]
 
 &lt;p&gt;This shows that for the backward pass over the CRF computations we need the marginals \(p(y_t \mid \mathbf{x})\) and \(p(y_t,y_{t+1} \mid \mathbf{x})\),
@@ -146,8 +145,11 @@ computing the partition function down to polynomial time. Additionally, to calcu
   use it to calculate the partition function.&lt;/p&gt;
 
 &lt;p&gt;Recall that, if done naively, the complexity of computing the
- partition function is \(|S|^m\). With some dynamic programming magic we can get this down to \(m \cdot |S|^2\). 
- How this works can be illustrated well when we write out the sums in the partition function 
+ partition function is \(|S|^m\). With some dynamic programming magic we can get this down to \(m \cdot |S|^2\).
+ Before I knew dynamic programming the term always sounded difficult to me, but it really is just nothing other than re-using
+ stuff you already computed before. E.g., if you have a function that calculates \(n!\) and it’s called more often
+ than once you can store the computations and re-use them when the function is called again.
+ How BP works can be illustrated well when we write out the sums and products in the partition function 
  (for the sake of this illustration we will use the factors \(\psi(\cdot)\) again):&lt;/p&gt;
 
 \[\begin{aligned}
@@ -199,7 +201,7 @@ p(y_t, y_{t+1} \mid \mathbf{x}) &amp;amp;= \sum_{y_1}\dots\sum_{y_{t-1}}\sum_{y_
 \end{aligned}\]
 
 &lt;p&gt;In the previous we saw how to compute this sum if we were to sum over all \(y_t\)’s, but we can also
-use it also to compute the marginals. To this end, we first do the exact same
+use it to compute the marginals. To this end, we first do the exact same
 as before to calculate the partition function, but rearranging the sums in a different way:&lt;/p&gt;
 
 \[\begin{aligned}
@@ -213,7 +215,7 @@ Z(\mathbf{x}) &amp;amp;= \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1)\su
 
 &lt;p&gt;We can calculate the rightmost column as follows:&lt;/p&gt;
 
-\[\beta(m, y^{\prime}_{m-1}) = \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot  \psi(y^{\prime}_{m}, y^{\prime}_{m-2})\]
+\[\beta(m, y^{\prime}_{m-1}) = \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot  \psi(y^{\prime}_{m}, y^{\prime}_{m-1})\]
 
 &lt;p&gt;Then, going backward from timestep \(m-1\) to timestep 2, we can compute the following recursion:&lt;/p&gt;
 

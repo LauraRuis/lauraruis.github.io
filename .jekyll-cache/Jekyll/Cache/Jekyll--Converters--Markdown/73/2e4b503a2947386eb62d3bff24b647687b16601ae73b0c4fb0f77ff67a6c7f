@@ -1,0 +1,9 @@
+I"¦<script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+
+<p>Hoi</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">print_hi</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+  <span class="k">print</span><span class="p">(</span><span class="s">"Hi, %s"</span> <span class="o">%</span><span class="p">)</span>
+<span class="n">print_hi</span><span class="p">(</span><span class="s">'Tom'</span><span class="p">)</span>
+<span class="c1">#=&gt; prints 'Hi, Tom' to STDOUT.</span></code></pre></figure>
+:ET
