@@ -1,0 +1,17 @@
+---
+layout: post
+title:  "Structured Prediction Pt. 2 - Implementing a linear-chain CRF"
+date:   2021-01-25 13:09:17 -0500
+categories: jekyll update
+usemathjax: true
+---
+<script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+
+Hoi
+
+{% highlight python %}
+def print_hi(name)
+  print("Hi, %s" %)
+print_hi('Tom')
+#=> prints 'Hi, Tom' to STDOUT.
+{% endhighlight %}

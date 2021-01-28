@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2021-01-27T20:18:10-05:00</updated><id>/feed.xml</id><title type="html">Ramblings</title><subtitle>Hoi</subtitle><entry><title type="html">Structured Prediction Pt. 1 - Linear-chain CRF</title><link href="/jekyll/update/2021/01/25/crfpt1.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 1 - Linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/jekyll/update/2021/01/25/crfpt1</id><content type="html" xml:base="/jekyll/update/2021/01/25/crfpt1.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;You’re looking at part 1 of a series of posts about &lt;em&gt;structured prediction with conditional random fields&lt;/em&gt;. In this post, we’ll talk about linear-chain
+CRFs applied to POS tagging. It will cover the necessary background to understand the motivation behind using a CRF,
+talking about things like &lt;em&gt;discriminative and generative modeling&lt;/em&gt;, &lt;em&gt;probabilistic graphical models&lt;/em&gt;, training a linear-chain CRF
+with efficient inference methods using &lt;em&gt;dynamic programming&lt;/em&gt; like &lt;em&gt;belief propagation&lt;/em&gt; (AKA the forward-backward algorithm), and decoding with &lt;em&gt;Viterbi&lt;/em&gt;. In part 2, 
+we will implement all these ingredients in the popular deep learning library &lt;a href=&quot;https://pytorch.org/&quot; target=&quot;_blank&quot;&gt;PyTorch&lt;/a&gt;.
+If you want to skip the background and start implementing, go to &lt;a href=&quot;/jekyll/update/2021/01/25/part2.html&quot;&gt;part 2&lt;/a&gt;.
+Part 3 and 4 of this series will go into using more general (non-linear) CRFs for dependency parsing. OK! Let’s start.&lt;/p&gt;
+
+&lt;p&gt;Consider the following sentence that is partly annotated with part-of-speech tags (POS tags):&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/images/annotated_example.gif&quot; alt=&quot;annotated_example&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;Whether the POS-tag we want to continue the labeling process with here is a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;noun&lt;/code&gt; or a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;verb&lt;/code&gt; depends on the POS-tag of the previous
+ word. In this case the previous label is &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;determiner&lt;/code&gt;, so we want to choose &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;noun&lt;/code&gt;. 
+ For sequence labeling tasks like this, and more general for structured prediction tasks, it is helpful to
+jointly decode the sequence, keeping into account dependencies among the labels.&lt;/p&gt;
+
+&lt;h2 id=&quot;structured-prediction&quot;&gt;Structured Prediction&lt;/h2&gt;
+&lt;p&gt;Structured prediction is a framework for solving problems of classification or regression in which the output variables
+are mutually dependent or constrained. It can be seen as a subset of prediction where we make use of the structure in
+the output space. The loss function used in structured prediction problems considers the outputs as a whole, meaning in
+the example above the loss of a sequence that has a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;verb&lt;/code&gt; following a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;determiner&lt;/code&gt; will be higher than a sequence where
+ a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;noun&lt;/code&gt; follows a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;determiner&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;Let’s denote the input sequence of words by \(\mathbf{x}\), the output space (i.e., the set of all possible target sequences) 
+by \(\mathcal{Y}\) and \(f(\mathbf{x}, \mathbf{y})\) some function that expresses how well \(\mathbf{x}\) fits 
+\(\mathbf{y}\) (we will clarify what this function is later), then prediction can be denoted by the following formula:&lt;/p&gt;
+
+\[\mathbf{y}^{\star} = arg \max_{\mathbf{y} \in \mathcal{Y}} f(\mathbf{x}, \mathbf{y})\]
+
+&lt;p&gt;The disctinction between regular classification and structured prediction is that for the latter some kind of
+search needs to be done over the output space – finding the \(\mathbf{y} \in \mathcal{Y}\) that maximizes the
+function \(f(\mathbf{x}, \mathbf{y})\). An exhaustive search is usually intractable and structured
+prediction methods, like conditional random fields, are required. To see why, consider that if we let the number of possible
+POS-tags be \(|\mathcal{S}|\) and the sequence length \(m\), there are \(|\mathcal{S}|^m\) possible sequences we would need to search over.
+Note that if we would ignore the dependencies in the output space and simply proceed decoding ‘greedily’, we could use the following formula for prediction
+for all words in the input sequence separately, requiring only \(|\mathcal{S}|\cdot m\) operations:&lt;/p&gt;
+
+\[y_i^{\star} = arg \max_{y \in \mathcal{S}} f(\mathbf{x}, y_i, i) \text{ for } i \in \{1, \dots, m\}\]
+
+&lt;h2 id=&quot;conditional-random-field&quot;&gt;Conditional Random Field&lt;/h2&gt;
+&lt;p&gt;A conditional random field (CRF, &lt;a href=&quot;https://repository.upenn.edu/cgi/viewcontent.cgi?article=1162&amp;amp;context=cis_papers&quot; target=&quot;_blank&quot;&gt;Lafferty et al., 2001&lt;/a&gt;) is a probabilistic graphical model that combines advantages of &lt;em&gt;discriminative classification&lt;/em&gt; and &lt;em&gt;graphical models&lt;/em&gt;.&lt;/p&gt;
+
+&lt;h1 id=&quot;discriminative-vs-generative-models&quot;&gt;Discriminative vs. Generative models&lt;/h1&gt;
+&lt;p&gt;In the discriminative approach to classification we model \(p(y \mid x)\) directly as opposed to the generative case 
+where we model \(p(x \mid y)\) and use it together with Bayes’ rule for prediction. If we model the conditional
+ directly, dependencies among \(x\) itself play no rule, resulting in a much simpler inference problem than modeling
+  the joint \(p(y, x)\). Generative models describe how some label \(y\) can generate some feature vector \(x\), whereas
+   discriminative models directly describe how to assign a feature vector \(x\) a label \(y\). CRFs are discriminative models.&lt;/p&gt;
+
+&lt;h1 id=&quot;graphical-models&quot;&gt;Graphical Models&lt;/h1&gt;
+&lt;p&gt;Probabilistic graphical models (PGMs) represent complex distributions over many variables as a product of local factors of smaller subsets of variables. 
+Based on what kind of graphical structure (i.e., conditional independence assumptions) one assumes, one can use linear 
+chain CRFs or more general CRFs. Generative models are often most naturally represented by directed graphical models (models \(p(x,y) = p(y)p(x \mid y)\)), whereas
+discriminative models are most naturally represented by undirected graphical models (models \(p(y \mid x)\) directly). 
+See in the figure below a generative PGM on the left, and a discriminative on the right.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/images/gen_vs_discr_pgm.png&quot; alt=&quot;pgms&quot; width=&quot;200&quot; class=&quot;center&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;CRFs can be represented as &lt;em&gt;factor graphs&lt;/em&gt;. A factor graph is a graph \(G = (V,F,E)\), in which \(V\) denotes the random 
+variables, \(F\) denotes the factors,
+and \(E\) the edges. A factor graph describes how a complex probability distribution factorizes, and thus imposes independence relations. 
+A distribution \(p(\mathbf{y})\) factorizes according to a factor graph \(G\) if there exists a set of local functions \(\psi_a\)
+such that \(p\) can be written as:&lt;/p&gt;
+
+\[p(\mathbf{y}) = \frac{1}{Z} \prod_{a \in F} \psi_a(y_{N(a)})\]
+
+&lt;p&gt;The factors \(\psi_a\) are each only dependent on the neighbors \(y_i\) of \(a\) (denoted by \(y_{N(a)}\)) in the factor graph.
+The factors need to be larger than zero, but need not have a probabilistic interpretation. The trick in using a factor graph
+for a task like classification is defining a set of feature functions that are nonzero only for a single class. Luckily, 
+we don’t need to hand-engineer such feature functions anymore and can hit it with the DL hammer &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;:)&lt;/code&gt; (which we will cover in &lt;a href=&quot;/jekyll/update/2021/01/25/part2.html&quot;&gt;part 2&lt;/a&gt; of this series).&lt;/p&gt;
+
+&lt;h1 id=&quot;linear-chain-crf&quot;&gt;Linear-Chain CRF&lt;/h1&gt;
+&lt;p&gt;Now it’s time to design a CRF for POS-tagging. We will use the fact that we want the prediction for each tag \(y_i\) to
+depend on both the previously predicted tag \(y_{i-1}\) and the input sequence of words \(\mathbf{x}\). This gives us the following factor graph:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/images/lincrf.png&quot; alt=&quot;lincrf&quot; width=&quot;800&quot; class=&quot;center&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;The graphical model underlying this particular linear-chain CRF implies two conditional independence assumptions:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;Each POS-tag is only dependent on its immediate predecessor and \(\mathbf{x}\): \(y_t \mathrel{\unicode{x2AEB}} \{y_1, \dots, y_{t - 2}\} \mid y_{t - 1}, \mathbf{x}\)&lt;/li&gt;
+  &lt;li&gt;Each word in the sentence \(x_t\) only depends on the current POS-tag \(y_t\): \(x_t \mathrel{\unicode{x2AEB}} \{x_i\}_{i \neq t}, \{y_i\}_{i \neq t} \mid y_t, \mathbf{x}\).&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;We can simply multiply all the factors in the above factor graph to get our the factorizied conditional probability distribution:&lt;/p&gt;
+
+\[\begin{aligned}
+p(\mathbf{y} \mid \mathbf{x}) &amp;amp;= \frac{1}{Z(\mathbf{x})} \prod_{t=1}^{m} \psi(y_t, \mathbf{x}, t) \prod_{t=1}^{m-1}\psi(y_t, y_{t+1}) \\
+ \end{aligned}\]
+
+&lt;p&gt;Additionally, what you need to know about a CRF is that it’s simply a specific way of choosing the factors, or in other
+words feature functions. The CRF-way of defining the factors is taking an exponential and a linear combination of 
+real-valued feature functions \(f(\cdot)\) with parameters \(\boldsymbol{\theta}_1\) and \(\boldsymbol{\theta}_2\):&lt;/p&gt;
+
+\[\begin{aligned}
+p(\mathbf{y} \mid \mathbf{x}) &amp;amp;= \frac{1}{Z(\mathbf{x})} \prod_{t=1}^{m} \exp\left(\boldsymbol{\theta}_1 \cdot f(y_t, \mathbf{x}, t)\right)\prod_{t=1}^{m-1} \exp\left(\boldsymbol{\theta}_2 \cdot f(y_t, y_{t+1})\right) \\ 
+  &amp;amp;= \frac{1}{Z(\mathbf{x})} \exp\left(\sum_{t=1}^m \boldsymbol{\theta}_1 \cdot f(y_t, \mathbf{x}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 \cdot f(y_t, y_{t+1})\right) \\
+Z(\mathbf{x}) &amp;amp;= \sum_{\mathbf{y}^{\prime}}\exp\left(\sum_{t=1}^m \boldsymbol{\theta}_1 \cdot f(y^{\prime}_t, \mathbf{x}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 \cdot f(y^{\prime}_t, y^{\prime}_{t+1})\right)
+ \end{aligned}\]
+
+&lt;p&gt;Intuitively, the first sum in the exponent above represents the probabilities that a particular \(y_t\) is the right POS-tag at time \(t\), and the
+second sum represents the probabilities that each \(y_{t+1}\) follows a particular \(y_{t}\). The value \(Z(\mathbf{x})\) is
+just the partition function ensuring that this formula is a properly defined probability distribution that sums to 1. Again, here the sum over all
+possible sequences of \(\mathbf{y}\) appears, and naive methods of computing this sum are intractable, which is why we will use belief propagation!&lt;/p&gt;
+
+&lt;h1 id=&quot;training-a-linear-chain-crf&quot;&gt;Training a Linear-Chain CRF&lt;/h1&gt;
+&lt;p&gt;We can train the CRF with regular maximum likehood estimation, given a set of \(N\) datapoints. Performing gradient 
+descent over the likelihood will require computing the factors from the PGM, which can be efficiently found with probabilistic
+inference methods like belief propagation. Let’s take a look at the log-likelihood:&lt;/p&gt;
+
+\[\begin{aligned}
+\log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= \log{\prod_{i=1}^N p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}, \boldsymbol{\theta}) } =  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})}\prod_{t=1}^m \psi_t (y_t^{(i)}, \mathbf{x}_t^{(i)}, t) \prod_{t=1}^{m-1} \psi_t (y_t^{(i)}, y_{t+1}^{(i)}) \Bigg]} \\
+    &amp;amp;=  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f_t(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} \\
+    &amp;amp;= \log{\Bigg[\prod_{i=1}^N \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f_t(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} + \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \Bigg]} \\
+    &amp;amp;= \sum_{i=1}^{N}\sum_{t=1}^m \boldsymbol{\theta}_1 f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f_t(y_t^{(i)}, y_{t+1}^{(i)}) - \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) \\
+\end{aligned}\]
+
+&lt;p&gt;To optimize the parameters, we need to calculate the gradients of the log-likelihood w.r.t. the parameters:&lt;/p&gt;
+
+\[\begin{aligned}
+\nabla_{\boldsymbol{\theta}_1} \log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= \sum_{i=1}^{N}\sum_{t=1}^m f_t(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) - \sum_{i=1}^N \nabla_{\boldsymbol{\theta}_1} \log(Z(\mathbf{x}^{(i)}))  \\
+\nabla_{\boldsymbol{\theta}_1} \log(Z(\mathbf{x}^{(i)})) &amp;amp;= \frac{\nabla_{\boldsymbol{\theta}_1}Z(\mathbf{x}^{(i)})}{Z(\mathbf{x}^{(i)})} \\
+&amp;amp;= \frac{\sum_{\mathbf{y}^{\prime}}\exp\left(\sum_{t=1}^m \boldsymbol{\theta}_1 \cdot f(y^{\prime}_t, \mathbf{x}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 \cdot f(y^{\prime}_t, y^{\prime}_{t+1})\right) \cdot f(y_t^{\prime},\mathbf{x},t)}{Z(\mathbf{x}^{(i)})} \\
+&amp;amp;= \sum_{y_1^{\prime}}\dots\sum_{y_m^{\prime}} p(\mathbf{y} \mid \mathbf{x})  \cdot f(y_t^{\prime},\mathbf{x},t) \\
+&amp;amp;= \sum_{y^{\prime}_t} p(y_t \mid \mathbf{x})  \cdot f(y_t^{\prime},\mathbf{x},t)
+\end{aligned}\]
+
+&lt;p&gt;Where the last step is true because we simply marginalize out all \(y_i\)’s for which \(i \neq t\). Similarly for the gradient w.r.t. \(\boldsymbol{\theta}_2\):&lt;/p&gt;
+
+\[\begin{aligned}
+\nabla_{\boldsymbol{\theta}_2} \log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= \sum_{y^{\prime}_t}\sum_{y^{\prime}_{t+1}} p(y_t,y_{t+1} \mid \mathbf{x})  \cdot f(y_t^{\prime},y_{t+1}^{\prime})
+\end{aligned}\]
+
+&lt;p&gt;This shows that for the backward pass over the CRF computations we need the marginals \(p(y_t \mid \mathbf{x})\) and \(p(y_t,y_{t+1} \mid \mathbf{x})\),
+which we can again compute efficiently with belief propagation.&lt;/p&gt;
+
+&lt;h1 id=&quot;efficient-inference-with-belief-propagation&quot;&gt;Efficient Inference with Belief Propagation&lt;/h1&gt;
+&lt;p&gt;For inference we simply need to calculate the function for \(p(\mathbf{y} \mid \mathbf{x})\) for a given input sequence.
+The nominator is easy to compute, but the denominator requires summing over all possible target sequences, which is intractable.
+Belief propagation (BP) is an algorithm to do efficient inference in PGMs, and we can use it to get the exponential time for
+computing the partition function down to polynomial time. Additionally, to calculate the gradients of the log-likelihood w.r.t. the parameters, 
+ we need to calculate the marginals. We’ll also use BP for this, but it’s easiest to explain if we first go over how to 
+  use it to calculate the partition function.&lt;/p&gt;
+
+&lt;p&gt;Recall that, if done naively, the complexity of computing the
+ partition function is \(|S|^m\). With some dynamic programming magic we can get this down to \(m \cdot |S|^2\). 
+ How this works can be illustrated well when we write out the sums in the partition function 
+ (for the sake of this illustration we will use the factors \(\psi(\cdot)\) again):&lt;/p&gt;
+
+\[\begin{aligned}
+Z(\mathbf{x}) &amp;amp;= \sum_{\mathbf{y}^{\prime}}\left(\prod_{t=1}^m \psi(y^{\prime}_t, \mathbf{x}, t) \cdot \prod_{t=1}^{m-1} \psi(y^{\prime}_t, y^{\prime}_{t+1})\right) \\
+&amp;amp;= \sum_{y^{\prime}_1}\sum_{y^{\prime}_2}\dots\sum_{y^{\prime}_m}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot \dots \cdot  \psi(y^{\prime}_m, \mathbf{x}, m) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \cdot  \dots \cdot  \psi(y^{\prime}_{m-1}, y^{\prime}_{m})
+\end{aligned}\]
+
+&lt;p&gt;Now if we rearrange the sums and take each factor as far forward as possible we get:&lt;/p&gt;
+
+\[\begin{aligned}
+Z(\mathbf{x}) &amp;amp;= \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m)\sum_{y^{\prime}_{m-1}}\psi(y^{\prime}_{m-1}, \mathbf{x}, m-1)\psi(y^{\prime}_{m-1}, y^{\prime}_{m}) \dots \dots \\ 
+&amp;amp; \quad \quad \quad \dots \sum_{y^{\prime}_2}\psi(y^{\prime}_2, \mathbf{x}, 2) \cdot  \psi(y^{\prime}_2, y^{\prime}_{3})\underbrace{\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})}_{\alpha(1, y^{\prime}_{2})}
+\end{aligned}\]
+
+&lt;p&gt;If we look at the last sum in the above equation, we can view it as a function of \(y^{\prime}_2\): \(\alpha(1, y^{\prime}_2)\),
+which for each value of \(y^{\prime}_2\) returns the sum over all \(y_1^{\prime}\):&lt;/p&gt;
+
+\[\alpha(1, y^{\prime}_2) = \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})\]
+
+&lt;p&gt;This function can also be seen as a vector of size \(|S|\) (that’s how many values \(y^{\prime}_2\) can take), where each entry
+represents a sum over, again, \(|S|\) values of \(y^{\prime}_1\) (now we can start to see where the \(|S|^2\) term in the time complexity comes from).
+ We can compute these and use them for the next sum in the equation. Let’s make this a bit clearer with an image. The below
+ image shows the flow of computation in a the DP algorithm belief-propagation. The columns are steps over time (from 1 to \(m-1\)),
+ and the rows are all different values \(y^{\prime}\) can take, which in this case are the POS-tags. So the vector representing \(\alpha(1, y^{\prime}_2)\) 
+ in the image below is the first column of green boxes. Then for all next time steps we can use the following recursion:&lt;/p&gt;
+
+\[\alpha(t, y^{\prime}_{t+1}) \leftarrow \sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \alpha(t-1, y^{\prime}_t)\]
+
+&lt;p&gt;So for each green box in the image below, we compute the above recursive function that uses all green boxes from the previous column. This costs
+ \(|S|\) operations for one green box, and we do this for each green box, in total \(|S|^2\) times. We do this for each column, giving us \((m-2) \cdot |S|^2\) operations.
+ If we then also consider the initialization computation for \(\alpha(1, y^{\prime}_2)\) costing \(|S|^2\) operations we get
+ the complexity of \((m - 1) \cdot |S|^2\). And then we just need to calculate the partition function from this, costing another \(|S|^2\) operations (see text below image).&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/images/beliefprop.png&quot; alt=&quot;beliefprop&quot; width=&quot;800&quot; class=&quot;center&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;By computing all the column vectors, we can finally get the partition function as follows:&lt;/p&gt;
+
+\[Z(\mathbf{x}) = \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot\alpha(m-1, y^{\prime}_m)\]
+
+&lt;p&gt;Where \(\alpha(m-1, y^{\prime}_m)\) are the values of the rightmost column. And, we get to the final complexity of \(m \cdot |S|^2\) for computing the partition function. If this is all we wanted,
+we would be done now. However we also need the marginals for calculating the gradient.&lt;/p&gt;
+
+&lt;p&gt;From probability theory we know that computing the marginals from a joint means summing (in the discrete case) over 
+all other variables, to marginalize them out. We need both \(p(y_t \mid \mathbf{x})\) and \(p(y_t, y_{t+1} \mid \mathbf{x})\):&lt;/p&gt;
+
+\[\begin{aligned}
+p(y_t \mid \mathbf{x}) &amp;amp;= \sum_{y_1}\dots\sum_{y_{t-1}}\sum_{y_{t+1}}\dots\sum_{y_m}p(\mathbf{y} \mid \mathbf{x}) \\
+p(y_t, y_{t+1} \mid \mathbf{x}) &amp;amp;= \sum_{y_1}\dots\sum_{y_{t-1}}\sum_{y_{t+2}}\dots\sum_{y_m}p(\mathbf{y} \mid \mathbf{x})
+\end{aligned}\]
+
+&lt;p&gt;In the previous we saw how to compute this sum if we were to sum over all \(y_t\)’s, but we can also
+use it also to compute the marginals. To this end, we first do the exact same
+as before to calculate the partition function, but rearranging the sums in a different way:&lt;/p&gt;
+
+\[\begin{aligned}
+Z(\mathbf{x}) &amp;amp;= \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1)\sum_{y^{\prime}_{2}}\psi(y^{\prime}_{2}, \mathbf{x}, 2)\psi(y^{\prime}_{1}, y^{\prime}_{2}) \dots \dots \\ 
+&amp;amp; \quad \quad \quad \dots \sum_{y^{\prime}_{m-1}}\psi(y^{\prime}_{m-1}, \mathbf{x}, m-1) \cdot  \psi(y^{\prime}_{m-1}, y^{\prime}_{m-2})\underbrace{\sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot  \psi(y^{\prime}_{m-1}, y^{\prime}_{m})}_{\beta(m, y^{\prime}_{m-1})}
+\end{aligned}\]
+
+&lt;p&gt;Now, by similar argument as the forward-case, we can do DP as illustrated by the following image.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/images/beliefprop_backward.png&quot; alt=&quot;beliefprop_backward&quot; width=&quot;800&quot; class=&quot;center&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;We can calculate the rightmost column as follows:&lt;/p&gt;
+
+\[\beta(m, y^{\prime}_{m-1}) = \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot  \psi(y^{\prime}_{m}, y^{\prime}_{m-2})\]
+
+&lt;p&gt;Then, going backward from timestep \(m-1\) to timestep 2, we can compute the following recursion:&lt;/p&gt;
+
+\[\beta(t, y^{\prime}_{t-1}) \leftarrow \sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t-1})\cdot \beta(t+1, y^{\prime}_t)\]
+
+&lt;p&gt;We can combine the &lt;em&gt;forward&lt;/em&gt; and &lt;em&gt;backward&lt;/em&gt; way of calculating the partition function to calculate the marginals. To see how, rearrange all the terms in the marginal:&lt;/p&gt;
+
+\[\begin{aligned}
+p(y_t \mid \mathbf{x}) &amp;amp;= \sum_{y_1}\dots\sum_{y_{t-1}}\sum_{y_{t+1}}\dots\sum_{y_m}p(\mathbf{y} \mid \mathbf{x}) \\
+&amp;amp;\propto \underbrace{\sum_{y_{t-1}}\psi(y_{t-1},\mathbf{x}, t-1)\sum_{y-2}\psi(y_{t-2},\mathbf{x}, t-2)\psi(y_{t-2},y_{t-1}) \dots \sum_{y_1}\psi(y_{1},\mathbf{x}, 1)\psi(y_{1},y_{2})}_{\alpha(t-1, y_t)} ...\\
+&amp;amp; \dots \underbrace{\sum_{y_{t+1}}\psi(y_{t+1},\mathbf{x}, t+1)\sum_{y_{t+2}}\psi(y_{t+2},\mathbf{x}, t+2)\psi(y_{t+2},y_{t+1}) \dots \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot  \psi(y^{\prime}_{m-1}, y^{\prime}_{m})}_{\beta(t+1, y_t)}  \\
+&amp;amp; \quad \quad \cdot \psi(y_t, \mathbf{x}, t) \\
+&amp;amp;\propto \alpha(t-1, y_t) \cdot \beta(t+1, y_t) \cdot \psi(y_t, \mathbf{x}, t)
+\end{aligned}\]
+
+&lt;p&gt;Note that we ignored the normalization constant in the above (hence the \(\propto\) sign), and we still need to normalize to get our marginal probability:&lt;/p&gt;
+
+\[\begin{aligned}
+p(y_t \mid \mathbf{x}) &amp;amp;= \frac{\alpha(t-1, y_t) \cdot \beta(t+1, y_t) \cdot \psi(y_t, \mathbf{x}, t)}{\sum_{y^{\prime}_t}\alpha(t-1, y{\prime}_t) \cdot \beta(t+1, y{\prime}_t) \cdot \psi(y{\prime}_t, \mathbf{x}, t)}
+\end{aligned}\]
+
+&lt;p&gt;By similar reasoning:&lt;/p&gt;
+
+\[\begin{aligned}
+p(y_t, y_{t+1} \mid \mathbf{x}) = \frac{\alpha(t-1, y_t) \cdot \beta(t+2, y_{t+1}) \cdot \psi(y_t, \mathbf{x}, t) \cdot \psi(y_t, y_{t+1}) \cdot \psi(y_{t+1})}{\sum_{y^{\prime}_t}\sum_{y^{\prime}_{t+1}}\alpha(t-1, y_t^{\prime}) \cdot \beta(t+2, y_{t+1}^{\prime}) \cdot \psi(y_t^{\prime}, \mathbf{x}, t) \cdot \psi(y^{\prime}_t, y^{\prime}_{t+1}) \cdot \psi(y^{\prime}_{t+1})}
+\end{aligned}\]
+
+&lt;p&gt;Now we have everything we need for the forward pass, inference, and the backward pass of gradient descent on the log-likelihood!&lt;/p&gt;
+
+&lt;h1 id=&quot;viterbi-decoding&quot;&gt;Viterbi Decoding&lt;/h1&gt;
+
+&lt;p&gt;All that’s left to discuss before we can start implementing is how to decode – meaning finding the maximum scoring target sequence according to our model. 
+This amounts to solving the following equation:&lt;/p&gt;
+
+&lt;p&gt;\(\mathbf{y}^{\star} = arg\max_{\mathbf{y} \in \mathcal{Y}} p(\mathbf{y} \mid \mathbf{x})\).&lt;/p&gt;
+
+&lt;h2 id=&quot;sources-i-used-for-this-post&quot;&gt;Sources I used for this post&lt;/h2&gt;
+&lt;p&gt;The following sources I heavily used for this post:&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://repository.upenn.edu/cgi/viewcontent.cgi?article=1162&amp;amp;context=cis_papers&quot; target=&quot;_blank&quot;&gt;The original CRF paper&lt;/a&gt; &lt;br /&gt;
+&lt;em&gt;John D. Lafferty, Andrew McCallum, and Fernando C. N. Pereira. Conditional random fields: Probabilistic models for segmenting and labeling sequence data. In Proceedings of the Eighteenth International Conference on Machine Learning, ICML ’01, pages 282–289, San Francisco, CA,USA, 2001. Morgan Kaufmann Publishers Inc.&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;The absolutely awesome &lt;a href=&quot;https://homepages.inf.ed.ac.uk/csutton/publications/crftutv2.pdf&quot; target=&quot;_blank&quot;&gt;introduction to CRFs&lt;/a&gt; by Charles Sutton and Andrew McCallum. &lt;br /&gt;
+&lt;em&gt;Charles Sutton and Andrew McCallum. An introduction to conditional random fields. Found.Trends Mach. Learn., 4(4):267–373, April 2012.&lt;/em&gt;&lt;/p&gt;
+
+&lt;p&gt;Hugo Larochelle’s &lt;a href=&quot;https://www.youtube.com/watch?v=GF3iSJkgPbA&quot; target=&quot;_blank&quot;&gt;tutorial on YouTube&lt;/a&gt;. Clearest explanation to be found about CRFs afaik!&lt;/p&gt;</content><author><name></name></author><category term="jekyll" /><category term="update" /><summary type="html"></summary></entry><entry><title type="html">Structured Prediction Pt. 2 - Implementing a linear-chain CRF</title><link href="/jekyll/update/2021/01/25/part2.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 2 - Implementing a linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/jekyll/update/2021/01/25/part2</id><content type="html" xml:base="/jekyll/update/2021/01/25/part2.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;Hoi&lt;/p&gt;
+
+&lt;figure class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-python&quot; data-lang=&quot;python&quot;&gt;&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;print_hi&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;name&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+  &lt;span class=&quot;k&quot;&gt;print&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;Hi, %s&quot;&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;%&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;print_hi&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'Tom'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;c1&quot;&gt;#=&amp;gt; prints 'Hi, Tom' to STDOUT.&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/figure&gt;</content><author><name></name></author><category term="jekyll" /><category term="update" /><summary type="html"></summary></entry></feed>

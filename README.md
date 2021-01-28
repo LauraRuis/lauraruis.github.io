@@ -1,2 +1,1 @@
-# lauraruis.github.io
-Website
+# structured_prediction_CRF
