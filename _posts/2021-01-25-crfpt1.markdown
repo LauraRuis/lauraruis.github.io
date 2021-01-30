@@ -12,7 +12,8 @@ CRFs applied to POS tagging. It will cover the necessary background to understan
 talking about things like *discriminative and generative modeling*, *probabilistic graphical models*, training a linear-chain CRF
 with efficient inference methods using *dynamic programming* like *belief propagation* (AKA the forward-backward algorithm), and decoding with *Viterbi*. In part 2, 
 we will implement all these ingredients in the popular deep learning library <a href="https://pytorch.org/" target="_blank">PyTorch</a>.
-If you want to skip the background and start implementing, go to [part 2]({% post_url 2021-01-25-part2 %}).
+If you want to skip the background and start implementing, go to [part 2]({% post_url 2021-01-25-part2 %}), where we'll put a linear-chain CRF on top of a bidirectional
+LSTM and train it all end-to-end on a POS-tagging dataset.
 Part 3 and 4 of this series will go into using more general (non-linear) CRFs for dependency parsing. OK! Let's start.
 
 Consider the following sentence that is partly annotated with part-of-speech tags (POS tags):
@@ -22,7 +23,7 @@ Consider the following sentence that is partly annotated with part-of-speech tag
 Whether the POS-tag we want to continue the labeling process with here is a `noun` or a `verb` depends on the POS-tag of the previous
  word. In this case the previous label is `determiner`, so we want to choose `noun`. 
  For sequence labeling tasks like this, and more general for structured prediction tasks, it is helpful to
-jointly decode the sequence, keeping into account dependencies among the labels. 
+model the dependencies among the labels. 
 
 ## Structured Prediction
 Structured prediction is a framework for solving problems of classification or regression in which the output variables
@@ -279,7 +280,50 @@ This amounts to solving the following equation:
 
 $$\mathbf{y}^{\star} = arg\max_{\mathbf{y} \in \mathcal{Y}} p(\mathbf{y} \mid \mathbf{x})$$.
 
+We don't want to calculate the probability of all possible sequences, so we will use DP again! The nice thing here is 
+that the Viterbi algorithm basically works the same way as belief propagation, and uses the same
+type of dynamic programming, but instead of calculating sums at every step, we are taking the maximum. Viterbi decoding
+has the same time complexity as belief propagation: $$m \cdot |S|^2$$. And it also consists of a forward-pass and a backward-pass.
+In the forward-pass we calculate all the maximum values for the current position in the sequence, and in the backward-pass we decode starting at the last position in the sequence. 
 
+Let's look at the forward-pass equations of belief propagation again:
+
+$$
+\begin{aligned}
+\alpha(1, y^{\prime}_2) &= \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\alpha(t, y^{\prime}_{t+1}) &\leftarrow \sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \alpha(t-1, y^{\prime}_t)
+\end{aligned}
+$$
+
+For Viterbi we do exactly the same thing but replace the sums by max, and we need to keep track of which of the previous $$y$$'s maximized the current recursion.
+We will call these values 'backpointers', because in the backward pass we'll use them to trace back the maximizing sequence.
+
+$$
+\begin{aligned}
+v(1, y^{\prime}_2) &= \max_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+v(t, y^{\prime}_{t+1}) &\leftarrow \max_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot v(t-1, y^{\prime}_t) \\
+\overleftarrow{v}(1, y^{\prime}_2) &= arg\max_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\ 
+\overleftarrow{v}(t, y^{\prime}_{t+1}) &\leftarrow arg\max_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot v(t-1, y^{\prime}_t) \\
+\end{aligned}
+$$
+
+In the below animation we can see the computations done in the forward- and backward-pass of Viterbi. We initialize the leftmost
+green boxes by taking the maximum of the initial values $$\max_{y^{\prime}_1}\bar{p}(y^{\prime}_1 \mid \mathbf{x}) = \max_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})$$ 
+(using $$\bar{p}(\cdot)$$ here because to distinguish it from the marginal probability of $$y_1$$ given $$\mathbf{x}$$).
+As the algorithm continues backpointers can take different paths. At the final column we can start actually decoding and decide what the maximizing final POS-tag is: $$\hat{y}^{\prime}_m = arg\max_{y^{\prime}_m}\psi(y^{\prime}_m) \cdot v_{m-1}(y^{\prime}_m)$$.
+ This also gives us the backpointer to follow to get the best path backwards, giving the maximizing sequence: $$\hat{y}^{\prime}_t \leftarrow \overleftarrow{v}_t(\hat{y}^{\prime}_{t+1}) $$  $$\forall t \in \{m-1, 1\}$$.
+
+![viterbi](/images/viterbigif/viterbi.gif)
+
+## Putting it all together
+Yay, that's all the ingredients! 
+
+We discussed that for some applications it's useful to model the dependencies among the output variables, which asks for structured prediction. In this case we chose a linear-chain conditional random field,
+which is simply a probabilistic graphical model with a particular choice of parametrized feature-functions as factors. We showed how to learn the parameters of the model by
+maximizing the likelihood. This procedure asked for an efficient way of calculating the partition function and the marginals of the CRF model, which we did with
+the dynamic programming algorithm belief propagation. Finally we showed how to find the maximizing sequence under the current model with the Viterbi algorithm.
+Now we are ready to implement everything in PyTorch, and use a deep neural network as a feature extractor. We can simply put the CRF on top of a neural network of choice,
+like LSTM's, and train everything end-to-end with stochastic gradient ascent on the likelihood! All part of [part 2]({% post_url 2021-01-25-part2 %}) of this series.
 
 ## Sources I used for this post
 The following sources I heavily used for this post:
