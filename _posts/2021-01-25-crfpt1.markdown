@@ -1,8 +1,6 @@
 ---
 layout: post
 title:  "Structured Prediction Pt. 1 - Linear-chain CRF"
-date:   2021-01-25 13:09:17 -0500
-categories: jekyll update
 usemathjax: true
 ---
 <script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
@@ -12,7 +10,7 @@ CRFs applied to POS tagging. It will cover the necessary background to understan
 talking about things like *discriminative and generative modeling*, *probabilistic graphical models*, training a linear-chain CRF
 with efficient inference methods using *dynamic programming* like *belief propagation* (AKA the forward-backward algorithm), and decoding with *Viterbi*. In part 2, 
 we will implement all these ingredients in the popular deep learning library <a href="https://pytorch.org/" target="_blank">PyTorch</a>.
-If you want to skip the background and start implementing, go to [part 2]({% post_url 2021-01-25-part2 %}), where we'll put a linear-chain CRF on top of a bidirectional
+If you want to skip the background and start implementing, go to [part 2]({% post_url 2021-01-25-crfpt2 %}), where we'll put a linear-chain CRF on top of a bidirectional
 LSTM and train it all end-to-end on a POS-tagging dataset.
 Part 3 and 4 of this series will go into using more general (non-linear) CRFs for dependency parsing. OK! Let's start.
 
@@ -76,7 +74,7 @@ $$p(\mathbf{y}) = \frac{1}{Z} \prod_{a \in F} \psi_a(y_{N(a)})$$
 The factors $$\psi_a$$ are each only dependent on the neighbors $$y_i$$ of $$a$$ (denoted by $$y_{N(a)}$$) in the factor graph.
 The factors need to be larger than zero, but need not have a probabilistic interpretation. The trick in using a factor graph
 for a task like classification is defining a set of feature functions that are nonzero only for a single class. Luckily, 
-we don't need to hand-engineer such feature functions anymore and can hit it with the DL hammer `:)` (which we will cover in [part 2]({% post_url 2021-01-25-part2 %}) of this series).
+we don't need to hand-engineer such feature functions anymore and can hit it with the DL hammer `:)` (which we will cover in [part 2]({% post_url 2021-01-25-crfpt2 %}) of this series).
 
 # Linear-Chain CRF
 Now it's time to design a CRF for POS-tagging. We will use the fact that we want the prediction for each tag $$y_i$$ to
@@ -323,7 +321,7 @@ which is simply a probabilistic graphical model with a particular choice of para
 maximizing the likelihood. This procedure asked for an efficient way of calculating the partition function and the marginals of the CRF model, which we did with
 the dynamic programming algorithm belief propagation. Finally we showed how to find the maximizing sequence under the current model with the Viterbi algorithm.
 Now we are ready to implement everything in PyTorch, and use a deep neural network as a feature extractor. We can simply put the CRF on top of a neural network of choice,
-like LSTM's, and train everything end-to-end with stochastic gradient ascent on the likelihood! All part of [part 2]({% post_url 2021-01-25-part2 %}) of this series.
+like LSTM's, and train everything end-to-end with stochastic gradient ascent on the likelihood! All part of [part 2]({% post_url 2021-01-25-crfpt2 %}) of this series.
 
 ## Sources I used for this post
 The following sources I heavily used for this post:

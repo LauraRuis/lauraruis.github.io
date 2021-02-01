@@ -1,11 +1,241 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2021-01-29T20:33:41-05:00</updated><id>/feed.xml</id><title type="html">Ramblings</title><subtitle>Dunno know what to write here except trans women are women and BLM should not be a discussion.</subtitle><entry><title type="html">Structured Prediction Pt. 1 - Linear-chain CRF</title><link href="/jekyll/update/2021/01/25/crfpt1.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 1 - Linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/jekyll/update/2021/01/25/crfpt1</id><content type="html" xml:base="/jekyll/update/2021/01/25/crfpt1.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2021-01-31T19:20:36-05:00</updated><id>/feed.xml</id><title type="html">Ramblings</title><subtitle>Blog about AI stuff.</subtitle><entry><title type="html">Structured Prediction Pt. 2 - Implementing a linear-chain CRF</title><link href="/2021/01/25/crfpt2.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 2 - Implementing a linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/2021/01/25/crfpt2</id><content type="html" xml:base="/2021/01/25/crfpt2.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+
+&lt;p&gt;In this part of the series of posts on structured prediction with CRFs we are going to implement all the ingredients
+that were discussed in &lt;a href=&quot;/2021/01/25/crfpt1.html&quot;&gt;part 1&lt;/a&gt;. Recall that in part 1 we discussed how to model
+the dependencies among the labels in sequence prediction tasks with a linear-chain CRF. Now, we will put a CRF
+on top of a neural network feature extractor and use it for
+POS-tagging.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/images/annotated_example.gif&quot; alt=&quot;annotated_example&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;To learn a model that can annotate examples like the one above with POS-tags, we need a two things:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;
+    &lt;p&gt;A dataset with examples consisting of input sentences annotated with POS-tags.&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;A feature extractor to extract features from our input data.&lt;/p&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;Then all the things we need to implement are:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;
+    &lt;p&gt;A &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Vocabulary&lt;/code&gt; to convert from strings to numerical values that are machine readable&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;A &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;TaggingDataset&lt;/code&gt; to convert all our data to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Tensors&lt;/code&gt; that can be processed by &lt;a href=&quot;https://pytorch.org/&quot; target=&quot;_blank&quot;&gt;PyTorch&lt;/a&gt;&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;An &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Encoder&lt;/code&gt; model that is our feature extractor. We’ll choose a bidirectional LSTM.&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;A &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF&lt;/code&gt; model that implements all the CRF methods, like belief propagation (BF) and Viterbi decoding.&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;A &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;train()&lt;/code&gt; loop to train our CRF and feature-extractor end-to-end on data.&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;A &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;test()&lt;/code&gt; loop to test a trained model on new data.&lt;/p&gt;
+  &lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;The final model we get by walking through this post is depicted in the image below.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/images/bilstmcrf.png&quot; alt=&quot;bilstmcrf&quot; width=&quot;600&quot; class=&quot;center&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;To train this model end-to-end we will use the negative log-likelihood (NLL) loss function, which is simply the negated log-likelihood
+that was given in part 1 of this series. Given some example input-output pairs \((\mathbf{x}^{(i)}, \mathbf{y}^{(i)})_{i=1}^N\),
+the NLL of the entire dataset is:&lt;/p&gt;
+
+\[\begin{aligned}
+\text{NLL} = -\log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= - \sum_{i=1}^{N} \log p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}) \\
+&amp;amp;= \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) - \sum_{i=1}^{N}\left(\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\right) \\
+\end{aligned}\]
+
+&lt;p&gt;Instead of maximizing the log-likelihood of our data, we will minimize the negative log-likelihood, which is equivalent.
+We can use stochastic gradient descent (SGD) with automatic differentiation in &lt;a href=&quot;https://pytorch.org/&quot; target=&quot;_blank&quot;&gt;PyTorch&lt;/a&gt;, meaning we only need the forward-part of the BP algorithm.
+Recall that the forward recursion allows calculation of the partition function (\(Z(\mathbf{x})\)), which we need for the NLL. The backward recursion allows calculating the
+marginals (which are needed for the gradients). PyTorch takes care of the latter calculation for us.&lt;/p&gt;
+
+&lt;p&gt;Let’s start with feature extraction and defining \(\boldsymbol{\theta}_1\), \(\boldsymbol{\theta}_2\), \(f(y_t, \mathbf{x}_t, t)\), and \(f(y_t, y_{t+1})\).&lt;/p&gt;
+
+&lt;h2 id=&quot;preliminaries&quot;&gt;Preliminaries&lt;/h2&gt;
+
+&lt;p&gt;Before we start, if you want to run the code used in this post yourself, make sure to install &lt;strong&gt;PyTorch &amp;gt;= 1.7.0&lt;/strong&gt;,
+&lt;strong&gt;Python 3.6&lt;/strong&gt;, and &lt;strong&gt;TorchNLP &amp;gt;= 0.5.0&lt;/strong&gt;.&lt;/p&gt;
+
+&lt;h2 id=&quot;feature-extraction&quot;&gt;Feature Extraction&lt;/h2&gt;
+
+&lt;p&gt;There are some desiderata for our features. The function \(f(y_t, \mathbf{x}_t, t)\) signifies that we want each tag in the output sequence \(y_t\) to be informed about (i.e., depend on) the entire input sequence \(\mathbf{x}\),
+but also on the current word at time \(t\).
+Furthermore, \(f(y_t, y_{t+1})\) tells us that we want each next output tag \(y_{t+1}\) to depend on the previous tag \(y_{t}\).
+Parametrizing the former part, we take \(\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t)\) to be the output of a bidirectional LSTM projected down to the right dimension with a linear layer:&lt;/p&gt;
+
+\[\begin{aligned}
+\mathbf{\bar{H}} &amp;amp;= \text{biLSTM}(\mathbf{x}) \\
+\mathbf{H} &amp;amp;= \mathbf{\bar{H}}\mathbf{W} + \mathbf{b}
+\end{aligned}\]
+
+&lt;p&gt;In the above, \(\mathbf{x} \in \mathbb{R}^{m}\) is our input sequence, \(\mathbf{\bar{H}} \in \mathbb{R}^{m \times 2d}\) the hidden vectors for each input word \(x_t\) stacked into a matrix, with \(d\) the hidden dimension of the LSTM (doubled because
+a bidirectional LSTM is essentially two LSTMs processing the input sequence from left-to-right and right-to-left).
+\(\mathbf{W} \in \mathbb{R}^{2d \times |S|}\) a matrix of parameters that projects the output to the right dimension, namely \(|S|\) values for each input word \(x_t\). The rows of \(\mathbf{H} \in \mathbb{R}^{m \times |S|}\)
+then holds the features for each word in the input sequence. 
+These values reflect \(\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t)\), since they depend on the entire input sequence \(\mathbf{x}\), but are specific to the current word at time \(t\).&lt;/p&gt;
+
+\[\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t) = \mathbf{H}_{t*}\]
+
+&lt;p&gt;Using PyTorch, we can code this up in a few lines. As is common in computational models of language, we will assign each
+input token a particular index and use dense word embeddings that represent each word in our input vocabulary. We reserve
+index 0 for the special token &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;PAD&amp;gt;&lt;/code&gt;, which we need later when we will batch our examples, grouping together examples
+of different length \(m\).&lt;/p&gt;
+
+&lt;p&gt;Strictly speaking btw, our bi-LSTM does not take \(\mathbf{x}\) as input but \(\mathbf{E}_{x_t*}\), where
+\(\mathbf{E}\) is the matrix of embedding parameters of size \(|S| \times d_e\). So if \(x_t = 3\) (index 3 in our vocabulary, which might
+be mapping to &lt;em&gt;book&lt;/em&gt; for example), \(\mathbf{E}_{x_t*}\) takes out the corresponding embedding of size \(d_e\).&lt;/p&gt;
+
+&lt;figure class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-python&quot; data-lang=&quot;python&quot;&gt;&lt;span class=&quot;k&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;Encoder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;nn&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Module&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+  &lt;span class=&quot;s&quot;&gt;&quot;&quot;&quot;
+  A simple encoder model to encode sentences. Bi-LSTM over word embeddings.
+  &quot;&quot;&quot;&lt;/span&gt;
+  &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;__init__&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;vocabulary_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;embedding_dim&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                     &lt;span class=&quot;n&quot;&gt;hidden_dimension&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;padding_idx&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+    &lt;span class=&quot;nb&quot;&gt;super&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Encoder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;).&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;__init__&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# The word embeddings.
+&lt;/span&gt;    &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;embedding&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;nn&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Embedding&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;num_embeddings&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;vocabulary_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+                                  &lt;span class=&quot;n&quot;&gt;embedding_dim&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;embedding_dim&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                                  &lt;span class=&quot;n&quot;&gt;padding_idx&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;padding_idx&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    
+    &lt;span class=&quot;c1&quot;&gt;# The bi-LSTM.
+&lt;/span&gt;    &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;bi_lstm&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;nn&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;LSTM&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_size&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;embedding_dim&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+                           &lt;span class=&quot;n&quot;&gt;hidden_size&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;hidden_dimension&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;num_layers&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+                           &lt;span class=&quot;n&quot;&gt;bias&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;True&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;bidirectional&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;True&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+  
+  &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;forward&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sentence&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+    &lt;span class=&quot;s&quot;&gt;&quot;&quot;&quot;
+    :param sentence: input sequence of size [batch_size, sequence_length]
+    Returns: tensor of size [batch_size, sequence_length, hidden_size * 2] 
+    the hidden states of the biLSTM for each time step.
+    &quot;&quot;&quot;&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;embedded&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;embedding&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sentence&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# embedded: [batch_size, sequence_length, embedding_dimension]
+&lt;/span&gt;    
+    &lt;span class=&quot;n&quot;&gt;output&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;hidden&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;cell&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;bi_lstm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;embedded&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# output: [batch_size, sequence_length, hidden_size * 2]
+&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# hidden: [batch_size, hidden_size * 2]
+&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# cell: [batch_size, hidden_size * 2]
+&lt;/span&gt;    &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;output&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/figure&gt;
+
+&lt;p&gt;That’s all we need to do to extract features from out input sequences! Later in this post we will define \(\boldsymbol{\theta}_2\) 
+and \(f(y_t, y_{t+1})\), which are part of the actual CRF. First, we’ll set up our &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Tagger&lt;/code&gt;-module which takes the encoder,
+the CRF (to implement later), and outputs the negative log-likelihood and a predicted tag sequence.&lt;/p&gt;
+
+&lt;h2 id=&quot;the-tagger&quot;&gt;The Tagger&lt;/h2&gt;
+
+&lt;p&gt;Below we can find the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Tagger&lt;/code&gt; module. This is basically the class that implements the model as depicted in the image
+above. There are still some missing parts (like the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Vocabulary&lt;/code&gt;-module, and the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF&lt;/code&gt;-module), but we’ll get to those. The
+ forward pass of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Tagger&lt;/code&gt; takes an input sequence, a target sequence, and an input mask (we’ll get to what that is
+ when we discuss batching), puts the input sequence through the encoder and the CRF, and outputs the NLL &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;loss&lt;/code&gt;, the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;score&lt;/code&gt; (
+ which is basically the nominator of \(p(\mathbf{y} \mid \mathbf{x})\)), and the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tag_sequence&lt;/code&gt; obtained by decoding with viterbi.&lt;/p&gt;
+
+&lt;figure class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-python&quot; data-lang=&quot;python&quot;&gt;&lt;span class=&quot;k&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;Tagger&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;nn&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Module&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+  &lt;span class=&quot;s&quot;&gt;&quot;&quot;&quot;
+  A POS-tagger.
+  &quot;&quot;&quot;&lt;/span&gt;
+  
+  &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;__init__&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_vocabulary&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Vocabulary&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+               &lt;span class=&quot;n&quot;&gt;target_vocabulary&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Vocabulary&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+               &lt;span class=&quot;n&quot;&gt;embedding_dimension&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;hidden_dimension&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+    &lt;span class=&quot;nb&quot;&gt;super&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tagger&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;).&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;__init__&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# The Encoder to extract features from the input sequence.
+&lt;/span&gt;    &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;encoder&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Encoder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;vocabulary_size&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_vocabulary&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+                           &lt;span class=&quot;n&quot;&gt;embedding_dim&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;embedding_dimension&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+                           &lt;span class=&quot;n&quot;&gt;hidden_dimension&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;hidden_dimension&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+                           &lt;span class=&quot;n&quot;&gt;padding_idx&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_vocabulary&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;pad_idx&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    
+    &lt;span class=&quot;c1&quot;&gt;# The linear projection (with parameters W and b).  
+&lt;/span&gt;    &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;encoder_to_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;nn&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Linear&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;hidden_dimension&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+                                     &lt;span class=&quot;n&quot;&gt;target_vocabulary&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    
+    &lt;span class=&quot;c1&quot;&gt;# The linear-chain CRF.
+&lt;/span&gt;    &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;tagger&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ChainCRF&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;num_tags&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;target_vocabulary&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+                           &lt;span class=&quot;n&quot;&gt;tag_vocabulary&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;target_vocabulary&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+  
+  &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;forward&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_sequence&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+              &lt;span class=&quot;n&quot;&gt;target_sequence&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+              &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_lengths&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# input_sequence: [batch_size, sequence_length, input_vocabulary_size]
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;lstm_features&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;encoder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_sequence&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# lstm_features: [batch_size, sequence_length, hidden_dimension*2]
+&lt;/span&gt;    
+    &lt;span class=&quot;n&quot;&gt;crf_features&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;encoder_to_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;lstm_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# crf_features: [batch_size, sequence_length, target_vocabulary_size]
+&lt;/span&gt;    
+    &lt;span class=&quot;n&quot;&gt;loss&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;score&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;tag_sequence&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;tagger&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;crf_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                                            &lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;target_sequence&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                                            &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                                            &lt;span class=&quot;n&quot;&gt;input_lengths&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_lengths&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# loss, score: scalars
+&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# tag_sequence: [batch_size, sequence_length]
+&lt;/span&gt;    &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;loss&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;score&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;tag_sequence&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/figure&gt;
+
+&lt;p&gt;OK, now we can finally get to the definition of \(\boldsymbol{\theta}_2\) and \(f(y_t, y_{t+1})\), and the implementation of the linear-chain CRF!&lt;/p&gt;
+
+&lt;h2 id=&quot;implementing-a-linear-chain-crf&quot;&gt;Implementing a Linear-Chain CRF&lt;/h2&gt;
+
+&lt;p&gt;We want \(f(y_t, y_{t+1})\) to represent the likelihood of some tag \(y_{t+1}\) following \(y_t\) in the sequence, which
+can be interpreted as transition ‘probabilities’ from one tag to another. The parameters \(\boldsymbol{\theta}_2\) are shared
+over time (meaning the same for each \(t \in \{1, \dots, m-1\}\)), and thus we can simply make a matrix of transition ‘probabilities’ from each tag to another tag.
+This matrix will be of size \((|S| + 2) \times (|S| + 2)\). The 2 extra tags are the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;ROOT&amp;gt;&lt;/code&gt; and the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;EOS&amp;gt;&lt;/code&gt; tag.
+We need some tag to start of the sequence and to end the sequence, because we want to take into account the probability of a particular tag being the
+first tag of a sequence, and the probability of a tag being the last tag. For the former we will use &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;ROOT&amp;gt;&lt;/code&gt;, and a for the latter we’ll use &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;EOS&amp;gt;&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;In this part we will implement:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;
+    &lt;p&gt;The forward-pass of belief propagation (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF.forward_belief_propagation(...)&lt;/code&gt;)&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;Calculating the nominator of \(p(\mathbf{y} \mid \mathbf{x})\) (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF.score_sentence(...)&lt;/code&gt;)&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;Decoding to get the target sequence prediction (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF.viterbi_decode(...)&lt;/code&gt;)&lt;/p&gt;
+  &lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;But first, since we implement all these method in batched versions, let’s briefly go over &lt;strong&gt;batching&lt;/strong&gt;.&lt;/p&gt;
+
+&lt;h1 id=&quot;sequence-batching&quot;&gt;Sequence Batching&lt;/h1&gt;
+
+&lt;p&gt;Processing data points in batches has multiple benefits: averaging the gradient over a minibatch in SGD allows playing
+with the noise you want while training your model (batch size of 1 is maximally noisy gradient, batch size of \(N\) is minimally
+noisy gradient, namely gradient descent without the stochasticity), but also: batching examples speeds up training. This motivates
+us to implement all the methods for the CRF in batched versions, allowing parallel processing. We can’t parallelize the time-dimension unfortunately.&lt;/p&gt;
+
+&lt;p&gt;A batch of size 2 would look like this:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/images/batch.png&quot; alt=&quot;batch&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;For each batch we will additionally keep track of the lengths in the batch. For the image above a list of lengths would be &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;example_lengths = [8, 5]&lt;/code&gt;.
+For example, batched inputs to our encoder will be of size &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;[batch_size, sequence_length]&lt;/code&gt; and outputs of size &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;[batch_size, sequence_length, hidden_dim*2]&lt;/code&gt;.
+The input mask for the above batch looks like this:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/images/input_mask.png&quot; alt=&quot;input_mask&quot; /&gt;&lt;/p&gt;
+
+&lt;h1 id=&quot;forward-belief-propagation&quot;&gt;Forward Belief Propagation&lt;/h1&gt;
+
+&lt;p&gt;In this section we will implement the forward-pass of belief propagation. We will do this in log-space, because numerical stability doesn’t do well with
+recursive multiplication of probabilities. In log-space, multiplications become summations, which have less of a risk of becoming too small.&lt;/p&gt;</content><author><name></name></author><summary type="html"></summary></entry><entry><title type="html">Structured Prediction Pt. 1 - Linear-chain CRF</title><link href="/2021/01/25/crfpt1.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 1 - Linear-chain CRF" /><published>2021-01-25T00:00:00-05:00</published><updated>2021-01-25T00:00:00-05:00</updated><id>/2021/01/25/crfpt1</id><content type="html" xml:base="/2021/01/25/crfpt1.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
 
 &lt;p&gt;You’re looking at part 1 of a series of posts about &lt;em&gt;structured prediction with conditional random fields&lt;/em&gt;. In this post, we’ll talk about linear-chain
 CRFs applied to POS tagging. It will cover the necessary background to understand the motivation behind using a CRF,
 talking about things like &lt;em&gt;discriminative and generative modeling&lt;/em&gt;, &lt;em&gt;probabilistic graphical models&lt;/em&gt;, training a linear-chain CRF
 with efficient inference methods using &lt;em&gt;dynamic programming&lt;/em&gt; like &lt;em&gt;belief propagation&lt;/em&gt; (AKA the forward-backward algorithm), and decoding with &lt;em&gt;Viterbi&lt;/em&gt;. In part 2, 
 we will implement all these ingredients in the popular deep learning library &lt;a href=&quot;https://pytorch.org/&quot; target=&quot;_blank&quot;&gt;PyTorch&lt;/a&gt;.
-If you want to skip the background and start implementing, go to &lt;a href=&quot;/jekyll/update/2021/01/25/part2.html&quot;&gt;part 2&lt;/a&gt;, where we’ll put a linear-chain CRF on top of a bidirectional
+If you want to skip the background and start implementing, go to &lt;a href=&quot;/2021/01/25/crfpt2.html&quot;&gt;part 2&lt;/a&gt;, where we’ll put a linear-chain CRF on top of a bidirectional
 LSTM and train it all end-to-end on a POS-tagging dataset.
 Part 3 and 4 of this series will go into using more general (non-linear) CRFs for dependency parsing. OK! Let’s start.&lt;/p&gt;
 
@@ -69,7 +299,7 @@ such that \(p\) can be written as:&lt;/p&gt;
 &lt;p&gt;The factors \(\psi_a\) are each only dependent on the neighbors \(y_i\) of \(a\) (denoted by \(y_{N(a)}\)) in the factor graph.
 The factors need to be larger than zero, but need not have a probabilistic interpretation. The trick in using a factor graph
 for a task like classification is defining a set of feature functions that are nonzero only for a single class. Luckily, 
-we don’t need to hand-engineer such feature functions anymore and can hit it with the DL hammer &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;:)&lt;/code&gt; (which we will cover in &lt;a href=&quot;/jekyll/update/2021/01/25/part2.html&quot;&gt;part 2&lt;/a&gt; of this series).&lt;/p&gt;
+we don’t need to hand-engineer such feature functions anymore and can hit it with the DL hammer &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;:)&lt;/code&gt; (which we will cover in &lt;a href=&quot;/2021/01/25/crfpt2.html&quot;&gt;part 2&lt;/a&gt; of this series).&lt;/p&gt;
 
 &lt;h1 id=&quot;linear-chain-crf&quot;&gt;Linear-Chain CRF&lt;/h1&gt;
 &lt;p&gt;Now it’s time to design a CRF for POS-tagging. We will use the fact that we want the prediction for each tag \(y_i\) to
@@ -292,7 +522,7 @@ which is simply a probabilistic graphical model with a particular choice of para
 maximizing the likelihood. This procedure asked for an efficient way of calculating the partition function and the marginals of the CRF model, which we did with
 the dynamic programming algorithm belief propagation. Finally we showed how to find the maximizing sequence under the current model with the Viterbi algorithm.
 Now we are ready to implement everything in PyTorch, and use a deep neural network as a feature extractor. We can simply put the CRF on top of a neural network of choice,
-like LSTM’s, and train everything end-to-end with stochastic gradient ascent on the likelihood! All part of &lt;a href=&quot;/jekyll/update/2021/01/25/part2.html&quot;&gt;part 2&lt;/a&gt; of this series.&lt;/p&gt;
+like LSTM’s, and train everything end-to-end with stochastic gradient ascent on the likelihood! All part of &lt;a href=&quot;/2021/01/25/crfpt2.html&quot;&gt;part 2&lt;/a&gt; of this series.&lt;/p&gt;
 
 &lt;h2 id=&quot;sources-i-used-for-this-post&quot;&gt;Sources I used for this post&lt;/h2&gt;
 &lt;p&gt;The following sources I heavily used for this post:&lt;/p&gt;
@@ -303,11 +533,4 @@ like LSTM’s, and train everything end-to-end with stochastic gradient ascent o
 &lt;p&gt;The absolutely awesome &lt;a href=&quot;https://homepages.inf.ed.ac.uk/csutton/publications/crftutv2.pdf&quot; target=&quot;_blank&quot;&gt;introduction to CRFs&lt;/a&gt; by Charles Sutton and Andrew McCallum. &lt;br /&gt;
 &lt;em&gt;Charles Sutton and Andrew McCallum. An introduction to conditional random fields. Found.Trends Mach. Learn., 4(4):267–373, April 2012.&lt;/em&gt;&lt;/p&gt;
 
-&lt;p&gt;Hugo Larochelle’s &lt;a href=&quot;https://www.youtube.com/watch?v=GF3iSJkgPbA&quot; target=&quot;_blank&quot;&gt;tutorial on YouTube&lt;/a&gt;. Clearest explanation to be found about CRFs afaik!&lt;/p&gt;</content><author><name></name></author><category term="jekyll" /><category term="update" /><summary type="html"></summary></entry><entry><title type="html">Structured Prediction Pt. 2 - Implementing a linear-chain CRF</title><link href="/jekyll/update/2021/01/25/part2.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 2 - Implementing a linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/jekyll/update/2021/01/25/part2</id><content type="html" xml:base="/jekyll/update/2021/01/25/part2.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
-
-&lt;p&gt;Hoi&lt;/p&gt;
-
-&lt;figure class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-python&quot; data-lang=&quot;python&quot;&gt;&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;print_hi&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;name&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-  &lt;span class=&quot;k&quot;&gt;print&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;Hi, %s&quot;&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;%&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;print_hi&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'Tom'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-&lt;span class=&quot;c1&quot;&gt;#=&amp;gt; prints 'Hi, Tom' to STDOUT.&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/figure&gt;</content><author><name></name></author><category term="jekyll" /><category term="update" /><summary type="html"></summary></entry></feed>
+&lt;p&gt;Hugo Larochelle’s &lt;a href=&quot;https://www.youtube.com/watch?v=GF3iSJkgPbA&quot; target=&quot;_blank&quot;&gt;tutorial on YouTube&lt;/a&gt;. Clearest explanation to be found about CRFs afaik!&lt;/p&gt;</content><author><name></name></author><summary type="html"></summary></entry></feed>

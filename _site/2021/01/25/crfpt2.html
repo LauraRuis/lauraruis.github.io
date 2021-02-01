@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.7.1 -->
+<title>Structured Prediction Pt. 2 - Implementing a linear-chain CRF | Ramblings</title>
+<meta name="generator" content="Jekyll v4.2.0" />
+<meta property="og:title" content="Structured Prediction Pt. 2 - Implementing a linear-chain CRF" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Blog about AI stuff." />
+<meta property="og:description" content="Blog about AI stuff." />
+<link rel="canonical" href="/2021/01/25/crfpt2.html" />
+<meta property="og:url" content="/2021/01/25/crfpt2.html" />
+<meta property="og:site_name" content="Ramblings" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2021-01-25T13:09:17-05:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Structured Prediction Pt. 2 - Implementing a linear-chain CRF" />
+<script type="application/ld+json">
+{"url":"/2021/01/25/crfpt2.html","headline":"Structured Prediction Pt. 2 - Implementing a linear-chain CRF","datePublished":"2021-01-25T13:09:17-05:00","dateModified":"2021-01-25T13:09:17-05:00","mainEntityOfPage":{"@type":"WebPage","@id":"/2021/01/25/crfpt2.html"},"description":"Blog about AI stuff.","@type":"BlogPosting","@context":"https://schema.org"}</script>
+<!-- End Jekyll SEO tag -->
+<link rel="stylesheet" href="/assets/main.css"><link type="application/atom+xml" rel="alternate" href="/feed.xml" title="Ramblings" /></head>
+<body><header class="site-header" role="banner">
+
+  <div class="wrapper"><a class="site-title" rel="author" href="/">Ramblings</a><nav class="site-nav">
+        <input type="checkbox" id="nav-trigger" class="nav-trigger" />
+        <label for="nav-trigger">
+          <span class="menu-icon">
+            <svg viewBox="0 0 18 15" width="18px" height="15px">
+              <path d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.032C17.335,0,18,0.665,18,1.484L18,1.484z M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.032C17.335,6.031,18,6.696,18,7.516L18,7.516z M18,13.516C18,14.335,17.335,15,16.516,15H1.484 C0.665,15,0,14.335,0,13.516l0,0c0-0.82,0.665-1.483,1.484-1.483h15.032C17.335,12.031,18,12.695,18,13.516L18,13.516z"/>
+            </svg>
+          </span>
+        </label>
+
+        <div class="trigger"><a class="page-link" href="/about/">About</a></div>
+      </nav></div>
+</header>
+<main class="page-content" aria-label="Content">
+      <div class="wrapper">
+        <article class="post h-entry" itemscope itemtype="http://schema.org/BlogPosting">
+
+  <header class="post-header">
+    <h1 class="post-title p-name" itemprop="name headline">Structured Prediction Pt. 2 - Implementing a linear-chain CRF</h1>
+    <p class="post-meta">
+      <time class="dt-published" datetime="2021-01-25T13:09:17-05:00" itemprop="datePublished">Jan 25, 2021
+      </time></p>
+  </header>
+
+  <div class="post-content e-content" itemprop="articleBody">
+    <script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+
+<p>In this part of the series of posts on structured prediction with CRFs we are going to implement all the ingredients
+that were discussed in <a href="/2021/01/25/crfpt1.html">part 1</a>. Recall that in part 1 we discussed how to model
+the dependencies among the labels in sequence prediction tasks with a linear-chain CRF. Now, we will put a CRF
+on top of a neural network feature extractor and use it for
+POS-tagging.</p>
+
+<p><img src="/images/annotated_example.gif" alt="annotated_example" /></p>
+
+<p>To learn a model that can annotate examples like the one above with POS-tags, we need a two things:</p>
+
+<ol>
+  <li>
+    <p>A dataset with examples consisting of input sentences annotated with POS-tags.</p>
+  </li>
+  <li>
+    <p>A feature extractor to extract features from our input data.</p>
+  </li>
+</ol>
+
+<p>Then all the things we need to implement are:</p>
+
+<ul>
+  <li>
+    <p>A <code class="language-plaintext highlighter-rouge">Vocabulary</code> to convert from strings to numerical values that are machine readable</p>
+  </li>
+  <li>
+    <p>A <code class="language-plaintext highlighter-rouge">TaggingDataset</code> to convert all our data to <code class="language-plaintext highlighter-rouge">Tensors</code> that can be processed by <a href="https://pytorch.org/" target="_blank">PyTorch</a></p>
+  </li>
+  <li>
+    <p>An <code class="language-plaintext highlighter-rouge">Encoder</code> model that is our feature extractor. We’ll choose a bidirectional LSTM.</p>
+  </li>
+  <li>
+    <p>A <code class="language-plaintext highlighter-rouge">ChainCRF</code> model that implements all the CRF methods, like belief propagation (BF) and Viterbi decoding.</p>
+  </li>
+  <li>
+    <p>A <code class="language-plaintext highlighter-rouge">train()</code> loop to train our CRF and feature-extractor end-to-end on data.</p>
+  </li>
+  <li>
+    <p>A <code class="language-plaintext highlighter-rouge">test()</code> loop to test a trained model on new data.</p>
+  </li>
+</ul>
+
+<p>The final model we get by walking through this post is depicted in the image below.</p>
+
+<p><img src="/images/bilstmcrf.png" alt="bilstmcrf" width="600" class="center" /></p>
+
+<p>To train this model end-to-end we will use the negative log-likelihood (NLL) loss function, which is simply the negated log-likelihood
+that was given in part 1 of this series. Given some example input-output pairs \((\mathbf{x}^{(i)}, \mathbf{y}^{(i)})_{i=1}^N\),
+the NLL of the entire dataset is:</p>
+
+\[\begin{aligned}
+\text{NLL} = -\log \mathcal{L}(\boldsymbol{\theta}) &amp;= - \sum_{i=1}^{N} \log p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}) \\
+&amp;= \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) - \sum_{i=1}^{N}\left(\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\right) \\
+\end{aligned}\]
+
+<p>Instead of maximizing the log-likelihood of our data, we will minimize the negative log-likelihood, which is equivalent.
+We can use stochastic gradient descent (SGD) with automatic differentiation in <a href="https://pytorch.org/" target="_blank">PyTorch</a>, meaning we only need the forward-part of the BP algorithm.
+Recall that the forward recursion allows calculation of the partition function (\(Z(\mathbf{x})\)), which we need for the NLL. The backward recursion allows calculating the
+marginals (which are needed for the gradients). PyTorch takes care of the latter calculation for us.</p>
+
+<p>Let’s start with feature extraction and defining \(\boldsymbol{\theta}_1\), \(\boldsymbol{\theta}_2\), \(f(y_t, \mathbf{x}_t, t)\), and \(f(y_t, y_{t+1})\).</p>
+
+<h2 id="preliminaries">Preliminaries</h2>
+
+<p>Before we start, if you want to run the code used in this post yourself, make sure to install <strong>PyTorch &gt;= 1.7.0</strong>,
+<strong>Python 3.6</strong>, and <strong>TorchNLP &gt;= 0.5.0</strong>.</p>
+
+<h2 id="feature-extraction">Feature Extraction</h2>
+
+<p>There are some desiderata for our features. The function \(f(y_t, \mathbf{x}_t, t)\) signifies that we want each tag in the output sequence \(y_t\) to be informed about (i.e., depend on) the entire input sequence \(\mathbf{x}\),
+but also on the current word at time \(t\).
+Furthermore, \(f(y_t, y_{t+1})\) tells us that we want each next output tag \(y_{t+1}\) to depend on the previous tag \(y_{t}\).
+Parametrizing the former part, we take \(\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t)\) to be the output of a bidirectional LSTM projected down to the right dimension with a linear layer:</p>
+
+\[\begin{aligned}
+\mathbf{\bar{H}} &amp;= \text{biLSTM}(\mathbf{x}) \\
+\mathbf{H} &amp;= \mathbf{\bar{H}}\mathbf{W} + \mathbf{b}
+\end{aligned}\]
+
+<p>In the above, \(\mathbf{x} \in \mathbb{R}^{m}\) is our input sequence, \(\mathbf{\bar{H}} \in \mathbb{R}^{m \times 2d}\) the hidden vectors for each input word \(x_t\) stacked into a matrix, with \(d\) the hidden dimension of the LSTM (doubled because
+a bidirectional LSTM is essentially two LSTMs processing the input sequence from left-to-right and right-to-left).
+\(\mathbf{W} \in \mathbb{R}^{2d \times |S|}\) a matrix of parameters that projects the output to the right dimension, namely \(|S|\) values for each input word \(x_t\). The rows of \(\mathbf{H} \in \mathbb{R}^{m \times |S|}\)
+then holds the features for each word in the input sequence. 
+These values reflect \(\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t)\), since they depend on the entire input sequence \(\mathbf{x}\), but are specific to the current word at time \(t\).</p>
+
+\[\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t) = \mathbf{H}_{t*}\]
+
+<p>Using PyTorch, we can code this up in a few lines. As is common in computational models of language, we will assign each
+input token a particular index and use dense word embeddings that represent each word in our input vocabulary. We reserve
+index 0 for the special token <code class="language-plaintext highlighter-rouge">&lt;PAD&gt;</code>, which we need later when we will batch our examples, grouping together examples
+of different length \(m\).</p>
+
+<p>Strictly speaking btw, our bi-LSTM does not take \(\mathbf{x}\) as input but \(\mathbf{E}_{x_t*}\), where
+\(\mathbf{E}\) is the matrix of embedding parameters of size \(|S| \times d_e\). So if \(x_t = 3\) (index 3 in our vocabulary, which might
+be mapping to <em>book</em> for example), \(\mathbf{E}_{x_t*}\) takes out the corresponding embedding of size \(d_e\).</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">class</span> <span class="nc">Encoder</span><span class="p">(</span><span class="n">nn</span><span class="p">.</span><span class="n">Module</span><span class="p">):</span>
+  <span class="s">"""
+  A simple encoder model to encode sentences. Bi-LSTM over word embeddings.
+  """</span>
+  <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vocabulary_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">embedding_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                     <span class="n">hidden_dimension</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">padding_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+    <span class="nb">super</span><span class="p">(</span><span class="n">Encoder</span><span class="p">,</span> <span class="bp">self</span><span class="p">).</span><span class="n">__init__</span><span class="p">()</span>
+    <span class="c1"># The word embeddings.
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">embedding</span> <span class="o">=</span> <span class="n">nn</span><span class="p">.</span><span class="n">Embedding</span><span class="p">(</span><span class="n">num_embeddings</span><span class="o">=</span><span class="n">vocabulary_size</span><span class="p">,</span> 
+                                  <span class="n">embedding_dim</span><span class="o">=</span><span class="n">embedding_dim</span><span class="p">,</span>
+                                  <span class="n">padding_idx</span><span class="o">=</span><span class="n">padding_idx</span><span class="p">)</span>
+    
+    <span class="c1"># The bi-LSTM.
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">bi_lstm</span> <span class="o">=</span> <span class="n">nn</span><span class="p">.</span><span class="n">LSTM</span><span class="p">(</span><span class="n">input_size</span><span class="o">=</span><span class="n">embedding_dim</span><span class="p">,</span> 
+                           <span class="n">hidden_size</span><span class="o">=</span><span class="n">hidden_dimension</span><span class="p">,</span> <span class="n">num_layers</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> 
+                           <span class="n">bias</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">bidirectional</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+  
+  <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sentence</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">:</span>
+    <span class="s">"""
+    :param sentence: input sequence of size [batch_size, sequence_length]
+    Returns: tensor of size [batch_size, sequence_length, hidden_size * 2] 
+    the hidden states of the biLSTM for each time step.
+    """</span>
+    <span class="n">embedded</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">embedding</span><span class="p">(</span><span class="n">sentence</span><span class="p">)</span>
+    <span class="c1"># embedded: [batch_size, sequence_length, embedding_dimension]
+</span>    
+    <span class="n">output</span><span class="p">,</span> <span class="p">(</span><span class="n">hidden</span><span class="p">,</span> <span class="n">cell</span><span class="p">)</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">bi_lstm</span><span class="p">(</span><span class="n">embedded</span><span class="p">)</span>
+    <span class="c1"># output: [batch_size, sequence_length, hidden_size * 2]
+</span>    <span class="c1"># hidden: [batch_size, hidden_size * 2]
+</span>    <span class="c1"># cell: [batch_size, hidden_size * 2]
+</span>    <span class="k">return</span> <span class="n">output</span></code></pre></figure>
+
+<p>That’s all we need to do to extract features from out input sequences! Later in this post we will define \(\boldsymbol{\theta}_2\) 
+and \(f(y_t, y_{t+1})\), which are part of the actual CRF. First, we’ll set up our <code class="language-plaintext highlighter-rouge">Tagger</code>-module which takes the encoder,
+the CRF (to implement later), and outputs the negative log-likelihood and a predicted tag sequence.</p>
+
+<h2 id="the-tagger">The Tagger</h2>
+
+<p>Below we can find the <code class="language-plaintext highlighter-rouge">Tagger</code> module. This is basically the class that implements the model as depicted in the image
+above. There are still some missing parts (like the <code class="language-plaintext highlighter-rouge">Vocabulary</code>-module, and the <code class="language-plaintext highlighter-rouge">ChainCRF</code>-module), but we’ll get to those. The
+ forward pass of the <code class="language-plaintext highlighter-rouge">Tagger</code> takes an input sequence, a target sequence, and an input mask (we’ll get to what that is
+ when we discuss batching), puts the input sequence through the encoder and the CRF, and outputs the NLL <code class="language-plaintext highlighter-rouge">loss</code>, the <code class="language-plaintext highlighter-rouge">score</code> (
+ which is basically the nominator of \(p(\mathbf{y} \mid \mathbf{x})\)), and the <code class="language-plaintext highlighter-rouge">tag_sequence</code> obtained by decoding with viterbi.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">class</span> <span class="nc">Tagger</span><span class="p">(</span><span class="n">nn</span><span class="p">.</span><span class="n">Module</span><span class="p">):</span>
+  <span class="s">"""
+  A POS-tagger.
+  """</span>
+  
+  <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_vocabulary</span><span class="p">:</span> <span class="n">Vocabulary</span><span class="p">,</span> 
+               <span class="n">target_vocabulary</span><span class="p">:</span> <span class="n">Vocabulary</span><span class="p">,</span>
+               <span class="n">embedding_dimension</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">hidden_dimension</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+    <span class="nb">super</span><span class="p">(</span><span class="n">Tagger</span><span class="p">,</span> <span class="bp">self</span><span class="p">).</span><span class="n">__init__</span><span class="p">()</span>
+    <span class="c1"># The Encoder to extract features from the input sequence.
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">encoder</span> <span class="o">=</span> <span class="n">Encoder</span><span class="p">(</span><span class="n">vocabulary_size</span><span class="o">=</span><span class="n">input_vocabulary</span><span class="p">.</span><span class="n">size</span><span class="p">,</span> 
+                           <span class="n">embedding_dim</span><span class="o">=</span><span class="n">embedding_dimension</span><span class="p">,</span> 
+                           <span class="n">hidden_dimension</span><span class="o">=</span><span class="n">hidden_dimension</span><span class="p">,</span> 
+                           <span class="n">padding_idx</span><span class="o">=</span><span class="n">input_vocabulary</span><span class="p">.</span><span class="n">pad_idx</span><span class="p">)</span>
+    
+    <span class="c1"># The linear projection (with parameters W and b).  
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">encoder_to_tags</span> <span class="o">=</span> <span class="n">nn</span><span class="p">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">hidden_dimension</span><span class="o">*</span><span class="mi">2</span><span class="p">,</span> 
+                                     <span class="n">target_vocabulary</span><span class="p">.</span><span class="n">size</span><span class="p">)</span>
+    
+    <span class="c1"># The linear-chain CRF.
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">tagger</span> <span class="o">=</span> <span class="n">ChainCRF</span><span class="p">(</span><span class="n">num_tags</span><span class="o">=</span><span class="n">target_vocabulary</span><span class="p">.</span><span class="n">size</span><span class="p">,</span> 
+                           <span class="n">tag_vocabulary</span><span class="o">=</span><span class="n">target_vocabulary</span><span class="p">)</span>
+  
+  <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_sequence</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
+              <span class="n">target_sequence</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
+              <span class="n">input_mask</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">input_lengths</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">):</span>
+    <span class="c1"># input_sequence: [batch_size, sequence_length, input_vocabulary_size]
+</span>    <span class="n">lstm_features</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">input_sequence</span><span class="p">)</span>
+    <span class="c1"># lstm_features: [batch_size, sequence_length, hidden_dimension*2]
+</span>    
+    <span class="n">crf_features</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">encoder_to_tags</span><span class="p">(</span><span class="n">lstm_features</span><span class="p">)</span>
+    <span class="c1"># crf_features: [batch_size, sequence_length, target_vocabulary_size]
+</span>    
+    <span class="n">loss</span><span class="p">,</span> <span class="n">score</span><span class="p">,</span> <span class="n">tag_sequence</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">tagger</span><span class="p">(</span><span class="n">input_features</span><span class="o">=</span><span class="n">crf_features</span><span class="p">,</span>
+                                            <span class="n">target_tags</span><span class="o">=</span><span class="n">target_sequence</span><span class="p">,</span>
+                                            <span class="n">input_mask</span><span class="o">=</span><span class="n">input_mask</span><span class="p">,</span>
+                                            <span class="n">input_lengths</span><span class="o">=</span><span class="n">input_lengths</span><span class="p">)</span>
+    <span class="c1"># loss, score: scalars
+</span>    <span class="c1"># tag_sequence: [batch_size, sequence_length]
+</span>    <span class="k">return</span> <span class="n">loss</span><span class="p">,</span> <span class="n">score</span><span class="p">,</span> <span class="n">tag_sequence</span></code></pre></figure>
+
+<p>OK, now we can finally get to the definition of \(\boldsymbol{\theta}_2\) and \(f(y_t, y_{t+1})\), and the implementation of the linear-chain CRF!</p>
+
+<h2 id="implementing-a-linear-chain-crf">Implementing a Linear-Chain CRF</h2>
+
+<p>We want \(f(y_t, y_{t+1})\) to represent the likelihood of some tag \(y_{t+1}\) following \(y_t\) in the sequence, which
+can be interpreted as transition ‘probabilities’ from one tag to another. The parameters \(\boldsymbol{\theta}_2\) are shared
+over time (meaning the same for each \(t \in \{1, \dots, m-1\}\)), and thus we can simply make a matrix of transition ‘probabilities’ from each tag to another tag.
+This matrix will be of size \((|S| + 2) \times (|S| + 2)\). The 2 extra tags are the <code class="language-plaintext highlighter-rouge">&lt;ROOT&gt;</code> and the <code class="language-plaintext highlighter-rouge">&lt;EOS&gt;</code> tag.
+We need some tag to start of the sequence and to end the sequence, because we want to take into account the probability of a particular tag being the
+first tag of a sequence, and the probability of a tag being the last tag. For the former we will use <code class="language-plaintext highlighter-rouge">&lt;ROOT&gt;</code>, and a for the latter we’ll use <code class="language-plaintext highlighter-rouge">&lt;EOS&gt;</code>.</p>
+
+<p>In this part we will implement:</p>
+
+<ul>
+  <li>
+    <p>The forward-pass of belief propagation (<code class="language-plaintext highlighter-rouge">ChainCRF.forward_belief_propagation(...)</code>)</p>
+  </li>
+  <li>
+    <p>Calculating the nominator of \(p(\mathbf{y} \mid \mathbf{x})\) (<code class="language-plaintext highlighter-rouge">ChainCRF.score_sentence(...)</code>)</p>
+  </li>
+  <li>
+    <p>Decoding to get the target sequence prediction (<code class="language-plaintext highlighter-rouge">ChainCRF.viterbi_decode(...)</code>)</p>
+  </li>
+</ul>
+
+<p>But first, since we implement all these method in batched versions, let’s briefly go over <strong>batching</strong>.</p>
+
+<h1 id="sequence-batching">Sequence Batching</h1>
+
+<p>Processing data points in batches has multiple benefits: averaging the gradient over a minibatch in SGD allows playing
+with the noise you want while training your model (batch size of 1 is maximally noisy gradient, batch size of \(N\) is minimally
+noisy gradient, namely gradient descent without the stochasticity), but also: batching examples speeds up training. This motivates
+us to implement all the methods for the CRF in batched versions, allowing parallel processing. We can’t parallelize the time-dimension unfortunately.</p>
+
+<p>A batch of size 2 would look like this:</p>
+
+<p><img src="/images/batch.png" alt="batch" /></p>
+
+<p>For each batch we will additionally keep track of the lengths in the batch. For the image above a list of lengths would be <code class="language-plaintext highlighter-rouge">example_lengths = [8, 5]</code>.
+For example, batched inputs to our encoder will be of size <code class="language-plaintext highlighter-rouge">[batch_size, sequence_length]</code> and outputs of size <code class="language-plaintext highlighter-rouge">[batch_size, sequence_length, hidden_dim*2]</code>.
+The input mask for the above batch looks like this:</p>
+
+<p><img src="/images/input_mask.png" alt="input_mask" /></p>
+
+<h1 id="forward-belief-propagation">Forward Belief Propagation</h1>
+
+<p>In this section we will implement the forward-pass of belief propagation. We will do this in log-space, because numerical stability doesn’t do well with
+recursive multiplication of probabilities. In log-space, multiplications become summations, which have less of a risk of becoming too small.</p>
+
+
+  </div><a class="u-url" href="/2021/01/25/crfpt2.html" hidden></a>
+</article>
+
+      </div>
+    </main><footer class="site-footer h-card">
+  <data class="u-url" href="/"></data>
+
+  <div class="wrapper">
+
+    <h2 class="footer-heading">Ramblings</h2>
+
+    <div class="footer-col-wrapper">
+      <div class="footer-col footer-col-1">
+        <ul class="contact-list">
+          <li class="p-name">Ramblings</li><li><a class="u-email" href="mailto:lauraruis92 at gmail dot com">lauraruis92 at gmail dot com</a></li></ul>
+      </div>
+
+      <div class="footer-col footer-col-2"><ul class="social-media-list"><li><a href="https://github.com/LauraRuis"><svg class="svg-icon"><use xlink:href="/assets/minima-social-icons.svg#github"></use></svg> <span class="username">LauraRuis</span></a></li><li><a href="https://www.twitter.com/lauraruis"><svg class="svg-icon"><use xlink:href="/assets/minima-social-icons.svg#twitter"></use></svg> <span class="username">lauraruis</span></a></li></ul>
+</div>
+
+      <div class="footer-col footer-col-3">
+        <p>Blog about AI stuff.</p>
+      </div>
+    </div>
+
+  </div>
+
+</footer>
+</body>
+
+</html>

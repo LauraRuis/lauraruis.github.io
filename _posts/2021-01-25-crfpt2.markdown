@@ -1,0 +1,227 @@
+---
+layout: post
+title:  "Structured Prediction Pt. 2 - Implementing a linear-chain CRF"
+date:   2021-01-25 13:09:17 -0500
+usemathjax: true
+---
+<script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+
+In this part of the series of posts on structured prediction with CRFs we are going to implement all the ingredients
+that were discussed in [part 1]({% post_url 2021-01-25-crfpt1 %}). Recall that in part 1 we discussed how to model
+the dependencies among the labels in sequence prediction tasks with a linear-chain CRF. Now, we will put a CRF
+on top of a neural network feature extractor and use it for
+POS-tagging.
+
+![annotated_example](/images/annotated_example.gif)
+
+To learn a model that can annotate examples like the one above with POS-tags, we need a two things:
+
+1. A dataset with examples consisting of input sentences annotated with POS-tags.
+
+2. A feature extractor to extract features from our input data.
+
+Then all the things we need to implement are:
+
+- A `Vocabulary` to convert from strings to numerical values that are machine readable
+
+- A `TaggingDataset` to convert all our data to `Tensors` that can be processed by <a href="https://pytorch.org/" target="_blank">PyTorch</a>
+
+- An `Encoder` model that is our feature extractor. We'll choose a bidirectional LSTM.
+
+- A `ChainCRF` model that implements all the CRF methods, like belief propagation (BF) and Viterbi decoding.
+
+- A `train()` loop to train our CRF and feature-extractor end-to-end on data.
+
+- A `test()` loop to test a trained model on new data.
+
+The final model we get by walking through this post is depicted in the image below.
+
+<img src="/images/bilstmcrf.png" alt="bilstmcrf" width="600" class="center"/>
+
+To train this model end-to-end we will use the negative log-likelihood (NLL) loss function, which is simply the negated log-likelihood
+that was given in part 1 of this series. Given some example input-output pairs $$(\mathbf{x}^{(i)}, \mathbf{y}^{(i)})_{i=1}^N$$,
+the NLL of the entire dataset is:
+
+$$
+\begin{aligned}
+\text{NLL} = -\log \mathcal{L}(\boldsymbol{\theta}) &= - \sum_{i=1}^{N} \log p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}) \\
+&= \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) - \sum_{i=1}^{N}\left(\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\right) \\
+\end{aligned}
+$$
+
+Instead of maximizing the log-likelihood of our data, we will minimize the negative log-likelihood, which is equivalent.
+We can use stochastic gradient descent (SGD) with automatic differentiation in <a href="https://pytorch.org/" target="_blank">PyTorch</a>, meaning we only need the forward-part of the BP algorithm.
+Recall that the forward recursion allows calculation of the partition function ($$Z(\mathbf{x})$$), which we need for the NLL. The backward recursion allows calculating the
+marginals (which are needed for the gradients). PyTorch takes care of the latter calculation for us.
+
+Let's start with feature extraction and defining $$\boldsymbol{\theta}_1$$, $$\boldsymbol{\theta}_2$$, $$f(y_t, \mathbf{x}_t, t)$$, and $$f(y_t, y_{t+1})$$.
+
+## Preliminaries
+
+Before we start, if you want to run the code used in this post yourself, make sure to install **PyTorch >= 1.7.0**,
+**Python 3.6**, and **TorchNLP >= 0.5.0**. 
+
+## Feature Extraction
+
+There are some desiderata for our features. The function $$f(y_t, \mathbf{x}_t, t)$$ signifies that we want each tag in the output sequence $$y_t$$ to be informed about (i.e., depend on) the entire input sequence $$\mathbf{x}$$,
+but also on the current word at time $$t$$.
+Furthermore, $$f(y_t, y_{t+1})$$ tells us that we want each next output tag $$y_{t+1}$$ to depend on the previous tag $$y_{t}$$.
+Parametrizing the former part, we take $$\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t)$$ to be the output of a bidirectional LSTM projected down to the right dimension with a linear layer:
+
+$$
+\begin{aligned}
+\mathbf{\bar{H}} &= \text{biLSTM}(\mathbf{x}) \\
+\mathbf{H} &= \mathbf{\bar{H}}\mathbf{W} + \mathbf{b}
+\end{aligned}
+$$
+
+In the above, $$\mathbf{x} \in \mathbb{R}^{m}$$ is our input sequence, $$\mathbf{\bar{H}} \in \mathbb{R}^{m \times 2d}$$ the hidden vectors for each input word $$x_t$$ stacked into a matrix, with $$d$$ the hidden dimension of the LSTM (doubled because
+a bidirectional LSTM is essentially two LSTMs processing the input sequence from left-to-right and right-to-left).
+$$\mathbf{W} \in \mathbb{R}^{2d \times |S|}$$ a matrix of parameters that projects the output to the right dimension, namely $$|S|$$ values for each input word $$x_t$$. The rows of $$\mathbf{H} \in \mathbb{R}^{m \times |S|}$$
+then holds the features for each word in the input sequence. 
+These values reflect $$\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t)$$, since they depend on the entire input sequence $$\mathbf{x}$$, but are specific to the current word at time $$t$$.
+
+$$\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t) = \mathbf{H}_{t*}$$
+
+Using PyTorch, we can code this up in a few lines. As is common in computational models of language, we will assign each
+input token a particular index and use dense word embeddings that represent each word in our input vocabulary. We reserve
+index 0 for the special token `<PAD>`, which we need later when we will batch our examples, grouping together examples
+of different length $$m$$. 
+
+Strictly speaking btw, our bi-LSTM does not take $$\mathbf{x}$$ as input but $$\mathbf{E}_{x_t*}$$, where
+$$\mathbf{E}$$ is the matrix of embedding parameters of size $$|S| \times d_e$$. So if $$x_t = 3$$ (index 3 in our vocabulary, which might
+be mapping to *book* for example), $$\mathbf{E}_{x_t*}$$ takes out the corresponding embedding of size $$d_e$$.
+
+{% highlight python %}
+class Encoder(nn.Module):
+  """
+  A simple encoder model to encode sentences. Bi-LSTM over word embeddings.
+  """
+  def __init__(self, vocabulary_size: int, embedding_dim: int,
+                     hidden_dimension: int, padding_idx: int):
+    super(Encoder, self).__init__()
+    # The word embeddings.
+    self.embedding = nn.Embedding(num_embeddings=vocabulary_size, 
+                                  embedding_dim=embedding_dim,
+                                  padding_idx=padding_idx)
+    
+    # The bi-LSTM.
+    self.bi_lstm = nn.LSTM(input_size=embedding_dim, 
+                           hidden_size=hidden_dimension, num_layers=1, 
+                           bias=True, bidirectional=True)
+  
+  def forward(self, sentence: torch.Tensor) -> torch.Tensor:
+    """
+    :param sentence: input sequence of size [batch_size, sequence_length]
+    Returns: tensor of size [batch_size, sequence_length, hidden_size * 2] 
+    the hidden states of the biLSTM for each time step.
+    """
+    embedded = self.embedding(sentence)
+    # embedded: [batch_size, sequence_length, embedding_dimension]
+    
+    output, (hidden, cell) = self.bi_lstm(embedded)
+    # output: [batch_size, sequence_length, hidden_size * 2]
+    # hidden: [batch_size, hidden_size * 2]
+    # cell: [batch_size, hidden_size * 2]
+    return output
+{% endhighlight %}
+
+That's all we need to do to extract features from out input sequences! Later in this post we will define $$\boldsymbol{\theta}_2$$ 
+and $$f(y_t, y_{t+1})$$, which are part of the actual CRF. First, we'll set up our `Tagger`-module which takes the encoder,
+the CRF (to implement later), and outputs the negative log-likelihood and a predicted tag sequence.
+
+## The Tagger
+
+Below we can find the `Tagger` module. This is basically the class that implements the model as depicted in the image
+above. There are still some missing parts (like the `Vocabulary`-module, and the `ChainCRF`-module), but we'll get to those. The
+ forward pass of the `Tagger` takes an input sequence, a target sequence, and an input mask (we'll get to what that is
+ when we discuss batching), puts the input sequence through the encoder and the CRF, and outputs the NLL `loss`, the `score` (
+ which is basically the nominator of $$p(\mathbf{y} \mid \mathbf{x})$$), and the `tag_sequence` obtained by decoding with viterbi.
+
+
+{% highlight python %}
+class Tagger(nn.Module):
+  """
+  A POS-tagger.
+  """
+  
+  def __init__(self, input_vocabulary: Vocabulary, 
+               target_vocabulary: Vocabulary,
+               embedding_dimension: int, hidden_dimension: int):
+    super(Tagger, self).__init__()
+    # The Encoder to extract features from the input sequence.
+    self.encoder = Encoder(vocabulary_size=input_vocabulary.size, 
+                           embedding_dim=embedding_dimension, 
+                           hidden_dimension=hidden_dimension, 
+                           padding_idx=input_vocabulary.pad_idx)
+    
+    # The linear projection (with parameters W and b).  
+    self.encoder_to_tags = nn.Linear(hidden_dimension*2, 
+                                     target_vocabulary.size)
+    
+    # The linear-chain CRF.
+    self.tagger = ChainCRF(num_tags=target_vocabulary.size, 
+                           tag_vocabulary=target_vocabulary)
+  
+  def forward(self, input_sequence: torch.Tensor, 
+              target_sequence: torch.Tensor, 
+              input_mask: torch.Tensor, input_lengths: torch.Tensor):
+    # input_sequence: [batch_size, sequence_length, input_vocabulary_size]
+    lstm_features = self.encoder(input_sequence)
+    # lstm_features: [batch_size, sequence_length, hidden_dimension*2]
+    
+    crf_features = self.encoder_to_tags(lstm_features)
+    # crf_features: [batch_size, sequence_length, target_vocabulary_size]
+    
+    loss, score, tag_sequence = self.tagger(input_features=crf_features,
+                                            target_tags=target_sequence,
+                                            input_mask=input_mask,
+                                            input_lengths=input_lengths)
+    # loss, score: scalars
+    # tag_sequence: [batch_size, sequence_length]
+    return loss, score, tag_sequence
+{% endhighlight %}
+
+OK, now we can finally get to the definition of $$\boldsymbol{\theta}_2$$ and $$f(y_t, y_{t+1})$$, and the implementation of the linear-chain CRF!
+
+## Implementing a Linear-Chain CRF
+
+We want $$f(y_t, y_{t+1})$$ to represent the likelihood of some tag $$y_{t+1}$$ following $$y_t$$ in the sequence, which
+can be interpreted as transition 'probabilities' from one tag to another. The parameters $$\boldsymbol{\theta}_2$$ are shared
+over time (meaning the same for each $$t \in \{1, \dots, m-1\}$$), and thus we can simply make a matrix of transition 'probabilities' from each tag to another tag.
+This matrix will be of size $$(|S| + 2) \times (|S| + 2)$$. The 2 extra tags are the `<ROOT>` and the `<EOS>` tag.
+We need some tag to start of the sequence and to end the sequence, because we want to take into account the probability of a particular tag being the
+first tag of a sequence, and the probability of a tag being the last tag. For the former we will use `<ROOT>`, and a for the latter we'll use `<EOS>`.
+
+In this part we will implement:
+
+- The forward-pass of belief propagation (`ChainCRF.forward_belief_propagation(...)`)
+
+- Calculating the nominator of $$p(\mathbf{y} \mid \mathbf{x})$$ (`ChainCRF.score_sentence(...)`)
+
+- Decoding to get the target sequence prediction (`ChainCRF.viterbi_decode(...)`)
+
+But first, since we implement all these method in batched versions, let's briefly go over **batching**.
+
+# Sequence Batching
+
+Processing data points in batches has multiple benefits: averaging the gradient over a minibatch in SGD allows playing
+with the noise you want while training your model (batch size of 1 is maximally noisy gradient, batch size of $$N$$ is minimally
+noisy gradient, namely gradient descent without the stochasticity), but also: batching examples speeds up training. This motivates
+us to implement all the methods for the CRF in batched versions, allowing parallel processing. We can't parallelize the time-dimension unfortunately.
+
+A batch of size 2 would look like this:
+
+![batch](/images/batch.png)
+
+For each batch we will additionally keep track of the lengths in the batch. For the image above a list of lengths would be `example_lengths = [8, 5]`.
+For example, batched inputs to our encoder will be of size `[batch_size, sequence_length]` and outputs of size `[batch_size, sequence_length, hidden_dim*2]`.
+The input mask for the above batch looks like this:
+
+![input_mask](/images/input_mask.png)
+
+# Forward Belief Propagation
+
+In this section we will implement the forward-pass of belief propagation. We will do this in log-space, because numerical stability doesn't do well with
+recursive multiplication of probabilities. In log-space, multiplications become summations, which have less of a risk of becoming too small.
+
