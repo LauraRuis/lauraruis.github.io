@@ -6,19 +6,20 @@ usemathjax: true
 ---
 <script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
 
-In this part of the series of posts on structured prediction with CRFs we are going to implement all the ingredients
-that were discussed in [part 1]({% post_url 2021-01-25-crfpt1 %}). Recall that in part 1 we discussed how to model
-the dependencies among the labels in sequence prediction tasks with a linear-chain CRF. Now, we will put a CRF
+In this part of the series of posts on structured prediction with conditional random fields (CRFs) we are going to implement all the ingredients
+that were discussed in [part 1]({% post_url 2021-01-25-crfpt1 %}). Recall that we discussed how to model
+the dependencies among labels in sequence prediction tasks with a linear-chain CRF. Now, we will put a such a CRF
 on top of a neural network feature extractor and use it for
-POS-tagging.
+part-of-speech (POS) tagging.
 
-![annotated_example](/images/annotated_example.gif)
+![annotated_example](/images/opener_gif/opener.gif)
 
-To learn a model that can annotate examples like the one above with POS-tags, we need a two things:
+To learn a model that can annotate examples like the one above with POS tags, we need two things:
 
-1. A dataset with examples consisting of input sentences annotated with POS-tags.
+1. A dataset with examples consisting of input sentences annotated with POS tags.
+We will choose the <a href="http://universaldependencies.org/" target="_blank">Universal Dependencies</a> dataset (<a href="https://www.aclweb.org/anthology/L14-1067/" target="_blank">Silveira et al., 2014</a>).
 
-2. A feature extractor to extract features from our input data.
+2. A feature extractor to extract features from our input data. For this we will choose a bidirectional LSTM, which we will motivate below. 
 
 Then all the things we need to implement are:
 
@@ -26,7 +27,7 @@ Then all the things we need to implement are:
 
 - A `TaggingDataset` to convert all our data to `Tensors` that can be processed by <a href="https://pytorch.org/" target="_blank">PyTorch</a>
 
-- An `Encoder` model that is our feature extractor. We'll choose a bidirectional LSTM.
+- An `Encoder` model that is our feature extractor (the bidirectional LSTM).
 
 - A `ChainCRF` model that implements all the CRF methods, like belief propagation (BF) and Viterbi decoding.
 
@@ -45,7 +46,7 @@ the NLL of the entire dataset is:
 $$
 \begin{aligned}
 \text{NLL} = -\log \mathcal{L}(\boldsymbol{\theta}) &= - \sum_{i=1}^{N} \log p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}) \\
-&= \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) - \sum_{i=1}^{N}\left(\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\right) \\
+&= \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) - \sum_{i=1}^{N}\left(\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\right) \\
 \end{aligned}
 $$
 
@@ -54,19 +55,19 @@ We can use stochastic gradient descent (SGD) with automatic differentiation in <
 Recall that the forward recursion allows calculation of the partition function ($$Z(\mathbf{x})$$), which we need for the NLL. The backward recursion allows calculating the
 marginals (which are needed for the gradients). PyTorch takes care of the latter calculation for us.
 
-Let's start with feature extraction and defining $$\boldsymbol{\theta}_1$$, $$\boldsymbol{\theta}_2$$, $$f(y_t, \mathbf{x}_t, t)$$, and $$f(y_t, y_{t+1})$$.
+Let's start with feature extraction and defining $$\boldsymbol{\theta}_1$$, $$\boldsymbol{\theta}_2$$, $$f(y_t, \mathbf{x}, t)$$, and $$f(y_t, y_{t+1})$$.
 
-## Preliminaries
+## <span style="color:#C0392B">Preliminaries</span>
 
-Before we start, if you want to run the code used in this post yourself, make sure to install **PyTorch >= 1.7.0**,
+Ok I lied, let's start with some preliminaries, if you want to run the code used in this post yourself, make sure to install **PyTorch >= 1.7.0**,
 **Python 3.6**, and **TorchNLP >= 0.5.0**. 
 
-## Feature Extraction
+## <span style="color:#C0392B">Feature Extraction</span>
 
-There are some desiderata for our features. The function $$f(y_t, \mathbf{x}_t, t)$$ signifies that we want each tag in the output sequence $$y_t$$ to be informed about (i.e., depend on) the entire input sequence $$\mathbf{x}$$,
+There are some desiderata for our features. The function $$f(y_t, \mathbf{x}, t)$$ signifies that we want each tag in the output sequence $$y_t$$ to be informed about (i.e., depend on) the entire input sequence $$\mathbf{x}$$,
 but also on the current word at time $$t$$.
 Furthermore, $$f(y_t, y_{t+1})$$ tells us that we want each next output tag $$y_{t+1}$$ to depend on the previous tag $$y_{t}$$.
-Parametrizing the former part, we take $$\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t)$$ to be the output of a bidirectional LSTM projected down to the right dimension with a linear layer:
+Parametrizing the former part, we take $$\boldsymbol{\theta}_1f(y_t, \mathbf{x}, t)$$ to be the output of a bidirectional LSTM projected down to the right dimension with a linear layer:
 
 $$
 \begin{aligned}
@@ -75,13 +76,13 @@ $$
 \end{aligned}
 $$
 
-In the above, $$\mathbf{x} \in \mathbb{R}^{m}$$ is our input sequence, $$\mathbf{\bar{H}} \in \mathbb{R}^{m \times 2d}$$ the hidden vectors for each input word $$x_t$$ stacked into a matrix, with $$d$$ the hidden dimension of the LSTM (doubled because
+In the above, $$\mathbf{x} \in \mathbb{R}^{m}$$ is our input sequence, $$\mathbf{\bar{H}} \in \mathbb{R}^{m \times 2d_h}$$ the hidden vectors for each input word $$x_t$$ stacked into a matrix, with $$d_h$$ the hidden dimension of the LSTM (doubled because
 a bidirectional LSTM is essentially two LSTMs processing the input sequence from left-to-right and right-to-left).
-$$\mathbf{W} \in \mathbb{R}^{2d \times |S|}$$ a matrix of parameters that projects the output to the right dimension, namely $$|S|$$ values for each input word $$x_t$$. The rows of $$\mathbf{H} \in \mathbb{R}^{m \times |S|}$$
-then holds the features for each word in the input sequence. 
-These values reflect $$\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t)$$, since they depend on the entire input sequence $$\mathbf{x}$$, but are specific to the current word at time $$t$$.
+$$\mathbf{W} \in \mathbb{R}^{2d_h \times |S|}$$ a matrix of parameters that projects the output to the right dimension, namely $$|S|$$ values for each input word $$x_t$$. The t-th row of $$\mathbf{H} \in \mathbb{R}^{m \times |S|}$$
+(let's define that by $$\mathbf{H}_{t*}$$) then holds the features for the t-th word ($$x_t$$) in the input sequence. 
+These values reflect $$\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t)$$ for each possible $$y_t$$, since they depend on the entire input sequence $$\mathbf{x}$$, but are specific to the current word at time $$t$$.
 
-$$\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t) = \mathbf{H}_{t*}$$
+$$\boldsymbol{\theta}_1f(y_t, \mathbf{x}_t, t) = \mathbf{H}_{t,y_t}$$
 
 Using PyTorch, we can code this up in a few lines. As is common in computational models of language, we will assign each
 input token a particular index and use dense word embeddings that represent each word in our input vocabulary. We reserve
@@ -130,19 +131,20 @@ That's all we need to do to extract features from out input sequences! Later in 
 and $$f(y_t, y_{t+1})$$, which are part of the actual CRF. First, we'll set up our `Tagger`-module which takes the encoder,
 the CRF (to implement later), and outputs the negative log-likelihood and a predicted tag sequence.
 
-## The Tagger
+## <span style="color:#C0392B">The Tagger</span>
 
 Below we can find the `Tagger` module. This is basically the class that implements the model as depicted in the image
-above. There are still some missing parts (like the `Vocabulary`-module, and the `ChainCRF`-module), but we'll get to those. The
+above. The most interesting part is still missing (namely the `ChainCRF`-module, but also the `Vocabulary`-module), but bear with me, we'll get to those. The
  forward pass of the `Tagger` takes an input sequence, a target sequence, and an input mask (we'll get to what that is
  when we discuss batching), puts the input sequence through the encoder and the CRF, and outputs the NLL `loss`, the `score` (
  which is basically the nominator of $$p(\mathbf{y} \mid \mathbf{x})$$), and the `tag_sequence` obtained by decoding with viterbi.
-
+If you don't have a feeling of what the parameters `input_mask` and `input_lengths` in the module should be, don't worry,
+that will be discussed in the section 'sequence batching' below.
 
 {% highlight python %}
 class Tagger(nn.Module):
   """
-  A POS-tagger.
+  A POS tagger.
   """
   
   def __init__(self, input_vocabulary: Vocabulary, 
@@ -156,7 +158,7 @@ class Tagger(nn.Module):
                            padding_idx=input_vocabulary.pad_idx)
     
     # The linear projection (with parameters W and b).  
-    self.encoder_to_tags = nn.Linear(hidden_dimension*2, 
+    self.encoder_to_tags = nn.Linear(hidden_dimension * 2, 
                                      target_vocabulary.size)
     
     # The linear-chain CRF.
@@ -166,6 +168,13 @@ class Tagger(nn.Module):
   def forward(self, input_sequence: torch.Tensor, 
               target_sequence: torch.Tensor, 
               input_mask: torch.Tensor, input_lengths: torch.Tensor):
+    """
+    :param input_sequence: input sequence of size [batch_size, sequence_length]
+    :param target_sequence: POS tags target, [batch_size, sequence_length]
+    :param input_mask: padding-mask, [batch_size, sequence_length]
+    :param input_lengths: lengths of each example in the batch [batch_size]
+    Returns: ...
+    """
     # input_sequence: [batch_size, sequence_length, input_vocabulary_size]
     lstm_features = self.encoder(input_sequence)
     # lstm_features: [batch_size, sequence_length, hidden_dimension*2]
@@ -184,44 +193,227 @@ class Tagger(nn.Module):
 
 OK, now we can finally get to the definition of $$\boldsymbol{\theta}_2$$ and $$f(y_t, y_{t+1})$$, and the implementation of the linear-chain CRF!
 
-## Implementing a Linear-Chain CRF
+## <span style="color:#C0392B">Implementing a Linear-Chain CRF</span>
 
 We want $$f(y_t, y_{t+1})$$ to represent the likelihood of some tag $$y_{t+1}$$ following $$y_t$$ in the sequence, which
 can be interpreted as transition 'probabilities' from one tag to another. The parameters $$\boldsymbol{\theta}_2$$ are shared
-over time (meaning the same for each $$t \in \{1, \dots, m-1\}$$), and thus we can simply make a matrix of transition 'probabilities' from each tag to another tag.
-This matrix will be of size $$(|S| + 2) \times (|S| + 2)$$. The 2 extra tags are the `<ROOT>` and the `<EOS>` tag.
+over time (meaning they are the same for each $$t \in \{1, \dots, m-1\}$$), and thus we can simply define a matrix of transition 'probabilities' from each tag to another tag.
+We define $$\boldsymbol{\theta}_2f(y_t, y_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}$$, meaning the t-th row and (t+1)-th column of a matrix $$\mathbf{T}$$.
+This matrix $$\mathbf{T}$$ will be of size $$(|S| + 2) \times (|S| + 2)$$. The 2 extra tags are the `<ROOT>` and the `<EOS>` tag.
 We need some tag to start of the sequence and to end the sequence, because we want to take into account the probability of a particular tag being the
 first tag of a sequence, and the probability of a tag being the last tag. For the former we will use `<ROOT>`, and a for the latter we'll use `<EOS>`.
 
 In this part we will implement:
 
-- The forward-pass of belief propagation (`ChainCRF.forward_belief_propagation(...)`)
+- The forward-pass of belief propagation (`ChainCRF.forward_belief_propagation(...)`), calculating the partition function (i.e., the denominator of $$p(\mathbf{y} \mid \mathbf{x})$$).
 
 - Calculating the nominator of $$p(\mathbf{y} \mid \mathbf{x})$$ (`ChainCRF.score_sentence(...)`)
 
 - Decoding to get the target sequence prediction (`ChainCRF.viterbi_decode(...)`)
 
+Below, you'll find the `ChainCRF` class that holds all these methods. The matrix of transition probabilities $$\mathbf{T}$$
+is initialized below as `log_transitions` (in log-space, so the matrix `log_transitions` corresponds to $$\log\mathbf{T}$$), and we hard-code the transition probabilities from any $$y_t$$ to the `<ROOT>`
+tag to be -10000 because this should not be possible (remember that to go from log-probabilities to probabilities we do `exp(log_transitions)` and $$\exp-10000 \approx 0$$).
+We do the same for any transition from `<EOS>` to any other tag. In the sections below we will implement the necessary methods for our linear-chain CRF, starting with belief propagation.
+{% highlight python %}
+ class ChainCRF(nn.Module):
+      """
+      A linear-chain conditional random field.
+      """
+      
+      def __init__(self, num_tags: int, tag_vocabulary: Vocabulary):
+        super(ChainCRF, self).__init__()
+
+        self.tag_vocabulary = tag_vocabulary
+        self.num_tags = num_tags + 2 # +2 for <ROOT> and <EOS>
+        self.root_idx = tag_vocabulary.size
+        self.end_idx = tag_vocabulary.size + 1
+
+        # Matrix of transition parameters.  Entry (i, j) is the score of
+        # transitioning *from* i *to* j.
+        self.log_transitions = nn.Parameter(torch.randn(self.num_tags, 
+                                                        self.num_tags))
+
+        # Initialize the log transitions with xavier uniform (TODO: refer)
+        self.xavier_uniform()
+
+        # These two statements enforce the constraint that we never transfer
+        # to the start tag and we never transfer from the stop tag
+        self.log_transitions.data[:, self.root_idx] = -10000.
+
+        self.log_transitions.data[self.end_idx, :] = -10000.
+      
+      def xavier_uniform(self, gain=1.):
+        torch.nn.init.xavier_uniform_(self.log_transitions)
+
+      def forward_belief_propagation(self, input_features: torch.Tensor, 
+                                    input_mask: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError()
+      
+      def score_sentence(self, input_features: torch.Tensor,
+                        target_tags: torch.Tensor, 
+                        input_mask: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError()
+          
+      def viterbi_decode(self, input_features: torch.Tensor, 
+                               input_lengths: torch.Tensor):
+        raise NotImplementedError()
+      
+      def negative_log_likelihood(self, input_features: torch.Tensor, 
+                                  target_tags: torch.Tensor, 
+                                  input_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Returns the NLL loss.
+        :param input_features: the features for each input sequence
+                [batch_size, sequence_length, feature_dimension]
+        :param target_tags: the target tags
+                [batch_size, sequence_length]
+        :param input_mask: the binary mask determining which of 
+                the input entries are padding [batch_size, sequence_length]
+        """
+        partition_function = self.forward_belief_propagation(
+                                    input_features=input_features, 
+                                    input_mask=input_mask)
+        nominator = self.score_sentence(
+                                    input_features=input_features,
+                                    target_tags=target_tags, 
+                                    input_mask=input_mask)
+        return partition_function - nominator
+
+      def forward(self, input_features: torch.Tensor, 
+                  target_tags: torch.Tensor, 
+                  input_mask: torch.Tensor,
+                  input_lengths: torch.Tensor) -> Tuple[torch.Tensor, 
+                                                        torch.Tensor, 
+                                                        torch.Tensor]:
+        """
+        The forward-pass of the CRF, which calculates the NLL loss and 
+        returns a predicted sequence.
+        :param input_features: features for each input sequence
+                [batch_size, sequence_length, feature_dimension]
+        :param target_tags: the target tags 
+                [batch_size, sequence_length]
+        :param input_mask: the binary mask determining which of 
+                the input entries are padding [batch_size, sequence_length]
+        """
+        loss = self.negative_log_likelihood(input_features=input_features, 
+                                            target_tags=target_tags,
+                                            input_mask=input_mask)
+        with torch.no_grad():
+          score, tag_sequence = self.viterbi_decode(input_features,
+                                                    input_lengths=input_lengths)
+        return loss, score, tag_sequence
+        
+{% endhighlight %}
+
+
 But first, since we implement all these method in batched versions, let's briefly go over **batching**.
 
-# Sequence Batching
+# <span style="color:#C0392B">Sequence Batching</span>
 
 Processing data points in batches has multiple benefits: averaging the gradient over a minibatch in SGD allows playing
-with the noise you want while training your model (batch size of 1 is maximally noisy gradient, batch size of $$N$$ is minimally
+with the noise you want while training your model (batch size of 1 gives a maximally noisy gradient, batch size of $$N$$ is minimally
 noisy gradient, namely gradient descent without the stochasticity), but also: batching examples speeds up training. This motivates
-us to implement all the methods for the CRF in batched versions, allowing parallel processing. We can't parallelize the time-dimension unfortunately.
+us to implement all the methods for the CRF in batched versions, allowing parallel processing. We can't parallelize the time-dimension in CRFs unfortunately.
 
 A batch of size 2 would look like this:
 
 ![batch](/images/batch.png)
 
-For each batch we will additionally keep track of the lengths in the batch. For the image above a list of lengths would be `example_lengths = [8, 5]`.
+For each batch we will additionally keep track of the lengths in the batch. For the image above a list of lengths would be `input_lengths = [8, 5]`.
 For example, batched inputs to our encoder will be of size `[batch_size, sequence_length]` and outputs of size `[batch_size, sequence_length, hidden_dim*2]`.
 The input mask for the above batch looks like this:
 
 ![input_mask](/images/input_mask.png)
 
-# Forward Belief Propagation
+# <span style="color:#C0392B">Forward Belief Propagation</span>
 
-In this section we will implement the forward-pass of belief propagation. We will do this in log-space, because numerical stability doesn't do well with
-recursive multiplication of probabilities. In log-space, multiplications become summations, which have less of a risk of becoming too small.
+In this section we will implement the forward-pass of belief propagation, which we need to calculate part of the NLL loss (namely $$\log\left(Z(\mathbf{x}^{(i)})\right)$$). We will do this in log-space, because numerical stability doesn't fare well with
+recursive multiplication of probabilities (i.e., values between 0 and 1). In log-space, multiplications become summations, which have less of a risk of becoming too small.
 
+Recall that the initialization and recursion in the forward-pass of belief propagation are given by the following equations:
+
+$$
+\begin{aligned}
+\alpha(1, y^{\prime}_2) &= \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\alpha(t, y^{\prime}_{t+1}) &\leftarrow \sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \alpha(t-1, y^{\prime}_t)
+\end{aligned}
+$$
+
+We discussed above that $$\psi(y^{\prime}_t, \mathbf{x}, t) = \mathbf{H}_{t,y_t}$$ (the t-th row and $$y_t$$-th column of the projected output of our encoder) and that $$\psi(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}$$
+(the $$y_t$$-th row and $$y_{t+1}$$-th columnd of the matrix of transition probabilities). So in the code `input_features` is a batch with $$\mathbf{H} \in \mathbb{R}^{m \times |S|}$$ for each data point. 
+The `log_transitions`, or $$\log\mathbf{T}_{y_t,y_{t+1}}$$, on the other hand, are the same for each example in the batch. 
+{% highlight python %}
+def forward_belief_propagation(self, input_features: torch.Tensor, 
+                                     input_mask: torch.Tensor)
+    """
+    Efficient inference with BP of the partition function of the ChainCRF.
+    :param input_features: the features for each input sequence
+            [batch_size, sequence_length, num_tags] 
+    :param input_mask: the binary mask determining which of the input 
+            entries are padding [batch_size, sequence_length]
+    """
+    batch_size, sequence_length, num_tags = input_features.size()
+    
+    # We don't have input features for the tags <ROOT> and <EOS>, so artifially
+    # construct those.
+    input_features = torch.cat(
+        [input_features, torch.zeros([batch_size, sequence_length, 2]) - 10000.],
+        dim=2)
+
+    # Initialize the recursion variables with 
+    # transitions from root token + first emission probabilities.
+    init_alphas = self.log_transitions[self.root_idx, :] + input_features[:, 0]
+
+    # Set recursion variable.
+    forward_var = init_alphas
+
+    # Make time major.
+    input_features = torch.transpose(input_features, 0, 1)
+    # input_features: [sequence_length, batch_size, num_tags]
+    input_mask = torch.transpose(input_mask.float(), 0, 1)
+    # input_mask [sequence_length, batch_size]
+
+    # Loop over sequence and calculate the transition probability for the next 
+    # tag at each step (from t - 1 to t)
+    # current tag at t - 1, next tag at t
+    # emission probabilities: (example, next tag)
+    # transition probabilities: (current tag, next tag)
+    # forward var: (instance, current tag)
+    # next tag var: (instance, current tag, next tag)
+    for time in range(1, max_time):
+
+      # Get emission scores for this time step.
+      features = input_features[time]
+
+      # Broadcast emission probabilities.
+      emit_scores = features.view(batch_size, self.num_tags).unsqueeze(1)
+
+      # Calculate transition probabilities (broadcast over example axis, same for all examples in batch).
+      transition_scores = self.log_transitions.unsqueeze(0)
+
+      # Calculate next tag probabilities.
+      next_tag_var = forward_var.unsqueeze(2) + emit_scores + transition_scores
+      print(next_tag_var.shape)
+
+      # Calculate next forward var by taking logsumexp over next tag axis, mask all instances that ended
+      # and keep old forward var for instances those.
+      forward_var = (logsumexp(next_tag_var, 1) * input_mask[time].view(batch_size, 1) +
+                      forward_var * (1 - input_mask[time]).view(batch_size, 1))
+
+    final_transitions = self.log_transitions[:, self.end_idx]
+
+    alphas = forward_var + final_transitions.unsqueeze(0)
+    partition_function = logsumexp(alphas)
+
+    return partition_function
+{% endhighlight %}
+
+# <span style="color:#2874A6">Sources</span>
+
+Natalia Silveira and Timothy Dozat and Marie-Catherine de Marneffe and Samuel Bowman and
+    Miriam Connor and John Bauer and Christopher D. Manning (2014).
+    <a href="https://www.aclweb.org/anthology/L14-1067/" target="_blank">*A Gold Standard Dependency Corpus for English*</a>
+    
+Xuezhe Ma and Eduard H. Hovy. 2016. <a href="https://arxiv.org/pdf/1603.01354.pdf" target="_blank">*End-to-end
+sequence labeling via bi-directional LSTM-CNNsCRF*</a>. In ACL.
