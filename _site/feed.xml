@@ -1,10 +1,18 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2021-02-01T21:57:01-05:00</updated><id>/feed.xml</id><title type="html">Ramblings</title><subtitle>Blog about AI stuff.</subtitle><entry><title type="html">Structured Prediction Pt. 2 - Implementing a linear-chain CRF</title><link href="/2021/01/25/crfpt2.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 2 - Implementing a linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/2021/01/25/crfpt2</id><content type="html" xml:base="/2021/01/25/crfpt2.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2021-02-07T21:56:41-05:00</updated><id>/feed.xml</id><title type="html">Ramblings</title><subtitle>Blog about AI stuff.</subtitle><entry><title type="html">Structured Prediction Pt. 2 - Implementing a linear-chain CRF</title><link href="/2021/01/25/crfpt2.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 2 - Implementing a linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/2021/01/25/crfpt2</id><content type="html" xml:base="/2021/01/25/crfpt2.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
 
 &lt;p&gt;In this part of the series of posts on structured prediction with conditional random fields (CRFs) we are going to implement all the ingredients
 that were discussed in &lt;a href=&quot;/2021/01/25/crfpt1.html&quot;&gt;part 1&lt;/a&gt;. Recall that we discussed how to model
 the dependencies among labels in sequence prediction tasks with a linear-chain CRF. Now, we will put a such a CRF
 on top of a neural network feature extractor and use it for
 part-of-speech (POS) tagging.&lt;/p&gt;
+
+&lt;p&gt;Everything below is inspired by &lt;a href=&quot;https://arxiv.org/abs/1603.01354&quot; target=&quot;_blank&quot;&gt;this paper&lt;/a&gt; by Ma &amp;amp; Hovy,
+and the implementation has lots of parts that come from
+&lt;a href=&quot;https://github.com/allenai/allennlp/blob/main/allennlp/modules/conditional_random_field.py&quot; target=&quot;_blank&quot;&gt;the AllenNLP implementation&lt;/a&gt;,
+so if it’s simply a good implementation you’re looking for, take a look at that one. If you’d like to understand how it works from scratch, keep on reading. Bear with me here,
+I discuss everything rather in detail and try not to skip over anything, from batching and broadcasting to changing the forward-recursion of BP for a cleaner implementation and Viterbi,
+so if you rather want a succint blogpost you might want to choose one of the great other options that are also out there! Alternatively, there are some sections you can skip
+if they’re clear, like batching and broadcasting.&lt;/p&gt;
 
 &lt;p&gt;&lt;img src=&quot;/images/opener_gif/opener.gif&quot; alt=&quot;annotated_example&quot; /&gt;&lt;/p&gt;
 
@@ -218,9 +226,9 @@ first tag of a sequence, and the probability of a tag being the last tag. For th
 &lt;/ul&gt;
 
 &lt;p&gt;Below, you’ll find the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF&lt;/code&gt; class that holds all these methods. The matrix of transition probabilities \(\mathbf{T}\)
-is initialized below as &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;log_transitions&lt;/code&gt; (in log-space, so the matrix &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;log_transitions&lt;/code&gt; corresponds to \(\log\mathbf{T}\)), and we hard-code the transition probabilities from any \(y_t\) to the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;ROOT&amp;gt;&lt;/code&gt;
-tag to be -10000 because this should not be possible (remember that to go from log-probabilities to probabilities we do &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;exp(log_transitions)&lt;/code&gt; and \(\exp-10000 \approx 0\)).
-We do the same for any transition from &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;EOS&amp;gt;&lt;/code&gt; to any other tag. In the sections below we will implement the necessary methods for our linear-chain CRF, starting with belief propagation.&lt;/p&gt;
+is initialized below as &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;log_transitions&lt;/code&gt; (note that \(\mathbf{T}\) are actually the log-transition probabilities because in the CRF equations they are \(\exp(\boldsymbol{\theta}_2f(y_t, y_{t+1})) = \exp\mathbf{T}_{y_t,y_{t+1}}\)), and we hard-code the transition probabilities from any \(y_t\) to the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;ROOT&amp;gt;&lt;/code&gt;
+tag to be -10000 because this should not be possible (and this becomes 0 in the CRF equation: &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;exp(log_transitions)&lt;/code&gt; gives \(\exp-10000 \approx 0\)).
+We do the same for any transition from &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;EOS&amp;gt;&lt;/code&gt; to any other tag. The class below implements the methods to calculate the NLL loss, and the total forward-pass of the CRF that returns this loss as well as a predicted tag sequence. In the sections below we will implement the necessary methods for our linear-chain CRF, starting with belief propagation.&lt;/p&gt;
 
 &lt;figure class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-python&quot; data-lang=&quot;python&quot;&gt; &lt;span class=&quot;k&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;ChainCRF&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;nn&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Module&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
       &lt;span class=&quot;s&quot;&gt;&quot;&quot;&quot;
@@ -262,7 +270,9 @@ We do the same for any transition from &lt;code class=&quot;language-plaintext h
         &lt;span class=&quot;k&quot;&gt;raise&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;NotImplementedError&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
           
       &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;viterbi_decode&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
-                               &lt;span class=&quot;n&quot;&gt;input_lengths&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+                               &lt;span class=&quot;n&quot;&gt;input_lengths&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Tuple&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;
+                                                        &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                                                        &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]:&lt;/span&gt;
         &lt;span class=&quot;k&quot;&gt;raise&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;NotImplementedError&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
       
       &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;negative_log_likelihood&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
@@ -330,21 +340,128 @@ The input mask for the above batch looks like this:&lt;/p&gt;
 
 &lt;p&gt;&lt;img src=&quot;/images/input_mask.png&quot; alt=&quot;input_mask&quot; /&gt;&lt;/p&gt;
 
-&lt;h1 id=&quot;forward-belief-propagation&quot;&gt;&lt;span style=&quot;color:#C0392B&quot;&gt;Forward Belief Propagation&lt;/span&gt;&lt;/h1&gt;
+&lt;h1 id=&quot;implementation-in-log-space-stable-logsumexp-ing--broadcasting&quot;&gt;&lt;span style=&quot;color:#C0392B&quot;&gt;Implementation in log-space, stable ‘‘logsumexp-ing’’ &amp;amp; broadcasting&lt;/span&gt;&lt;/h1&gt;
 
-&lt;p&gt;In this section we will implement the forward-pass of belief propagation, which we need to calculate part of the NLL loss (namely \(\log\left(Z(\mathbf{x}^{(i)})\right)\)). We will do this in log-space, because numerical stability doesn’t fare well with
-recursive multiplication of probabilities (i.e., values between 0 and 1). In log-space, multiplications become summations, which have less of a risk of becoming too small.&lt;/p&gt;
-
-&lt;p&gt;Recall that the initialization and recursion in the forward-pass of belief propagation are given by the following equations:&lt;/p&gt;
+&lt;p&gt;Before we can finally get into the interesting implementations, we need to talk about two things. Firstly,
+for calculating the partition function we are going to need to sum a bunch of \(exp(\cdot)\)’s, which might explode.
+To do this numerically stable, we will use the &lt;em&gt;logsumexp&lt;/em&gt;-trick. The log here comes from the fact that we will implement
+everything in log-space. Numerical stability doesn’t fare well with
+recursive multiplication of small values (i.e., values between 0 and 1) or large values. 
+In log-space, multiplications become summations, which have less of a risk of becoming too small or too large.
+Recall that the initialization and recursion in the forward-pass of belief propagation are given by the following equations:&lt;/p&gt;
 
 \[\begin{aligned}
 \alpha(1, y^{\prime}_2) &amp;amp;= \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
 \alpha(t, y^{\prime}_{t+1}) &amp;amp;\leftarrow \sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \alpha(t-1, y^{\prime}_t)
 \end{aligned}\]
 
-&lt;p&gt;We discussed above that \(\psi(y^{\prime}_t, \mathbf{x}, t) = \mathbf{H}_{t,y_t}\) (the t-th row and \(y_t\)-th column of the projected output of our encoder) and that \(\psi(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\)
-(the \(y_t\)-th row and \(y_{t+1}\)-th columnd of the matrix of transition probabilities). So in the code &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;input_features&lt;/code&gt; is a batch with \(\mathbf{H} \in \mathbb{R}^{m \times |S|}\) for each data point. 
-The &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;log_transitions&lt;/code&gt;, or \(\log\mathbf{T}_{y_t,y_{t+1}}\), on the other hand, are the same for each example in the batch.&lt;/p&gt;
+&lt;p&gt;First we convert the alpha initialization to log-space:&lt;/p&gt;
+
+\[\begin{aligned}
+\alpha(1, y^{\prime}_2) &amp;amp;= \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\log \alpha(1, y^{\prime}_2) &amp;amp;= \log \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\end{aligned}\]
+
+&lt;p&gt;Then we convert the recursion equation to log-space, we plug in the CRF factors, and we see why we
+get a &lt;em&gt;logsumexp&lt;/em&gt;:&lt;/p&gt;
+
+\[\begin{aligned}
+\log \alpha(t, y^{\prime}_{t+1}) &amp;amp;\leftarrow \log \sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\alpha(t-1, y^{\prime}_t) \\
+\log \alpha(t, y^{\prime}_{t+1}) &amp;amp;\leftarrow \log \sum_{y^{\prime}_{t}}\exp\left(\boldsymbol{\theta}_1f(y^{\prime}_t, \mathbf{x}, t) + \boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1})\right) \cdot \exp\log\alpha(t-1, y^{\prime}_t) \\
+\log \alpha(t, y^{\prime}_{t+1}) &amp;amp;\leftarrow \underbrace{\log \sum_{y^{\prime}_{t}}\exp}_{\text{logsumexp}}\left(\boldsymbol{\theta}_1f(y^{\prime}_t, \mathbf{x}, t) + \boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) + \log\alpha(t-1, y^{\prime}_t)\right)
+\end{aligned}\]
+
+&lt;p&gt;Now what &lt;em&gt;logsumexp&lt;/em&gt; does is rewrite this as follows. Let everything inside the \(exp(\cdot)\) above for simplicity be \(q_t\):&lt;/p&gt;
+
+\[\begin{aligned}
+\log \sum_{y^{\prime}_{t}}\exp(q_t) &amp;amp;= \log \sum_{y^{\prime}_{t}}\exp(q_t - c + c) \\
+&amp;amp;= \log \sum_{y^{\prime}_{t}}\exp(q_t - c)\exp(c) \\
+&amp;amp;= \log \exp(c)\sum_{y^{\prime}_{t}}\exp(q_t - c) \\
+&amp;amp;= c + \log\sum_{y^{\prime}_{t}}\exp(q_t - c) \\
+\end{aligned}\]
+
+&lt;p&gt;If we take the constant \(c\) to be the maximum value that \(q_t\) can take in the sum, the summation becomes stable.
+See below the code that implements this, adapted from AllenNLP.&lt;/p&gt;
+
+&lt;figure class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-python&quot; data-lang=&quot;python&quot;&gt;&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;logsumexp&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;dim&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;int&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=-&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+    &lt;span class=&quot;s&quot;&gt;&quot;&quot;&quot;
+    A numerically stable computation of logsumexp. This is mathematically
+    equivalent to `tensor.exp().sum(dim).log()`. 
+    This function is typically used for summing log probabilities.
+    :param tensor: A tensor of arbitrary size.
+    :param dim: The dimension of the tensor to apply the logsumexp to.
+    &quot;&quot;&quot;&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;max_score&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;_&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;max&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;dim&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;stable_vec&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;tensor&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;max_score&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;dim&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;max_score&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;stable_vec&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;exp&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;sum&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;dim&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)).&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;log&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/figure&gt;
+
+&lt;p&gt;Broadcasting over dimensions is conceptually the same thing as matrix multiplication of a column vector with a row vector,
+but then by summing. For example, if we sum &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;a + b = c&lt;/code&gt; where \(a \in \mathbb{R}^{2 \times 1}\) and \(b \in \mathbb{R}^{1 \times 2}\)
+the result will be \(c \in \mathbb{R}^{2 \times 2}\):&lt;/p&gt;
+
+\[\begin{pmatrix}
+1\\ 
+2\\ 
+\end{pmatrix} + \begin{pmatrix}
+3 &amp;amp; 4
+\end{pmatrix} = \begin{pmatrix}
+4 &amp;amp; 5\\ 
+5 &amp;amp; 6
+\end{pmatrix}\]
+
+&lt;p&gt;You can use broadcasting if you have a value that you want to add to every index of a vector, like
+in the above case 1 is added to 3 and 4 for the top row and 2 to 3 and 4 for the bottom row.&lt;/p&gt;
+
+&lt;h1 id=&quot;forward-belief-propagation&quot;&gt;&lt;span style=&quot;color:#C0392B&quot;&gt;Forward Belief Propagation&lt;/span&gt;&lt;/h1&gt;
+
+&lt;p&gt;In this section we will implement the forward-pass of belief propagation, which we need to calculate part of the NLL loss (namely \(\log\left(Z(\mathbf{x}^{(i)})\right)\)).&lt;/p&gt;
+
+&lt;p&gt;We are implementing the forward recursion in a batched version, meaning that the loop over time goes from
+\(t=1\) to \(m-1\) for the largest \(m\) in the batch. Some sequences might already end somewhere earlier in the loop,
+which is why we will mask out the recursion for those sequences and retain the old \(\alpha\) variables for them.
+Implementing batched forward belief propagation becomes &lt;em&gt;a lot&lt;/em&gt; easier if we instead of using the recursion
+equation as defined above, use the following recursion:&lt;/p&gt;
+
+\[\begin{aligned}
+\hat{\alpha}(1, y^{\prime}_2) &amp;amp;= \psi(y^{\prime}_2, \mathbf{x}, 2)\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\hat{\alpha}(t, y^{\prime}_{t+1}) &amp;amp;\leftarrow \psi(y^{\prime}_{t+1}, \mathbf{x}, t+1)\sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \hat{\alpha}(t-1, y^{\prime}_t)
+\end{aligned}\]
+
+&lt;p&gt;Why this is equivalent in the end becomes apparent when we look at the full partition function that we’re trying to compute.
+We simply already take the unary features \(\psi(y_2^{\prime}, \mathbf{x}, 2)\) for the next recursion.&lt;/p&gt;
+
+\[\begin{aligned}
+Z(\mathbf{x}) &amp;amp;= \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m)\sum_{y^{\prime}_{m-1}}\psi(y^{\prime}_{m-1}, \mathbf{x}, m-1)\psi(y^{\prime}_{m-1}, y^{\prime}_{m}) \dots \dots \\ 
+&amp;amp; \quad \quad \quad \dots \sum_{y^{\prime}_2}\psi(y^{\prime}_2, \mathbf{x}, 2) \cdot  \psi(y^{\prime}_2, y^{\prime}_{3})\underbrace{\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})}_{\alpha(1, y^{\prime}_{2})} \\
+&amp;amp;= \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m)\sum_{y^{\prime}_{m-1}}\psi(y^{\prime}_{m-1}, \mathbf{x}, m-1)\psi(y^{\prime}_{m-1}, y^{\prime}_{m}) \dots \dots \\ 
+&amp;amp; \quad \quad \quad \dots \sum_{y^{\prime}_2} \psi(y^{\prime}_2, y^{\prime}_{3}) \cdot \underbrace{\psi(y^{\prime}_2, \mathbf{x}, 2)\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})}_{\hat{\alpha}(1, y^{\prime}_{2})}
+\end{aligned}\]
+
+&lt;p&gt;Remember that in the forward recursion of BP we looped until \(m-1\), and then for time \(m\) we don’t have transition probabilities to \(m+1\) anymore, so we separately did the following:&lt;/p&gt;
+
+\[Z(\mathbf{x}) = \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot\alpha(m-1, y^{\prime}_m)\]
+
+&lt;p&gt;The new recursion results in much easier code because instead of separately keeping track of when each sequence in the batch
+ends and writing an if-else statement within the loop over time that calculates the above equations for the sequences that
+are ending, we simply already incorporate the unary features of \(y_{t+1}^{\prime}\) in each recursive calculation.
+Then, at the end we only need to sum all new alphas:&lt;/p&gt;
+
+\[Z(\mathbf{x}) = \sum_{y^{\prime}_m}\hat{\alpha}(m-1, y^{\prime}_m)\]
+
+&lt;p&gt;The equations we are going to implement now are these recursions in log-space. In the equation below I’ve annotated
+every part of the equations with the corresponding variable name their values are a part of in the implementation below.&lt;/p&gt;
+
+\[\begin{aligned}
+\log\hat{\alpha}(1, y^{\prime}_2) &amp;amp;= \log\psi(y^{\prime}_2, \mathbf{x}, 2) + \log\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\log\hat{\alpha}(t, y^{\prime}_{t+1}) &amp;amp;\leftarrow \log\left(\psi(y^{\prime}_{t+1}, \mathbf{x}, t+1)\sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\hat{\alpha}(t-1, y^{\prime}_t)\right) \\
+&amp;amp;\leftarrow \log\left(\sum_{y^{\prime}_{t}}\psi(y^{\prime}_{t+1}, \mathbf{x}, t+1) \cdot \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\hat{\alpha}(t-1, y^{\prime}_t)\right) \\
+&amp;amp;\leftarrow \log\left(\sum_{y^{\prime}_{t}}\exp\left(\underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \underbrace{\boldsymbol{\theta}_2(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{\alpha}(t-1, y^{\prime}_t)}_{\text{forward_alpha_e}}\right)\right) \\
+\end{aligned}\]
+
+&lt;p&gt;We discussed above that \(\boldsymbol{\theta}_1f(y^{\prime}_t, \mathbf{x}, t) = \mathbf{H}_{t,y_t}\) is the t-th row and \(y_t\)-th column of the projected output of our encoder. These values are collected in a vector called &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;unary_features&lt;/code&gt; for all \(y^{\prime}_t\) (meaning the vector has size \(|S|\)). Then \(\boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\)
+is the \(y_t\)-th row and \(y_{t+1}\)-th column of the matrix of transition probabilities. The vector &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;transition_scores&lt;/code&gt; in the code holds the probabilities from all \(y_t\)’s to a particular \(y_{t+1}\).&lt;/p&gt;
+
+&lt;p&gt;Now let’s take a look at the code that implements all this. Below the code we’ll go through some clarifications.&lt;/p&gt;
 
 &lt;figure class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-python&quot; data-lang=&quot;python&quot;&gt;&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;forward_belief_propagation&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
                                      &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
@@ -357,58 +474,144 @@ The &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;log_trans
     &quot;&quot;&quot;&lt;/span&gt;
     &lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sequence_length&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;num_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
     
-    &lt;span class=&quot;c1&quot;&gt;# We don't have input features for the tags &amp;lt;ROOT&amp;gt; and &amp;lt;EOS&amp;gt;, so artifially
-&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# construct those.
+    &lt;span class=&quot;c1&quot;&gt;# We don't have input features for the tags &amp;lt;ROOT&amp;gt; and &amp;lt;EOS&amp;gt;, 
+&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# so we artifially add those at the tag-dimension. 
+&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# See in the class constructor above that the last 
+&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# two indices are for the &amp;lt;ROOT&amp;gt; and &amp;lt;EOS&amp;gt; tags.
 &lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;cat&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
         &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;zeros&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;([&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sequence_length&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;])&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;mf&quot;&gt;10000.&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;],&lt;/span&gt;
         &lt;span class=&quot;n&quot;&gt;dim&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
 
     &lt;span class=&quot;c1&quot;&gt;# Initialize the recursion variables with 
-&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# transitions from root token + first emission probabilities.
+&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# transitions from root token + first unary features.
 &lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;init_alphas&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;log_transitions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;root_idx&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;:]&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[:,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
 
     &lt;span class=&quot;c1&quot;&gt;# Set recursion variable.
-&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;forward_var&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;init_alphas&lt;/span&gt;
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;forward_alpha&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;init_alphas&lt;/span&gt;
 
-    &lt;span class=&quot;c1&quot;&gt;# Make time major.
+    &lt;span class=&quot;c1&quot;&gt;# Make time major, we will loop over the time-dimension.
 &lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;transpose&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
     &lt;span class=&quot;c1&quot;&gt;# input_features: [sequence_length, batch_size, num_tags]
 &lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;transpose&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;float&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(),&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
     &lt;span class=&quot;c1&quot;&gt;# input_mask [sequence_length, batch_size]
 &lt;/span&gt;
-    &lt;span class=&quot;c1&quot;&gt;# Loop over sequence and calculate the transition probability for the next 
-&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# tag at each step (from t - 1 to t)
-&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# current tag at t - 1, next tag at t
-&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# emission probabilities: (example, next tag)
-&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# transition probabilities: (current tag, next tag)
-&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# forward var: (instance, current tag)
-&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# next tag var: (instance, current tag, next tag)
+    &lt;span class=&quot;c1&quot;&gt;# Loop over sequence and calculate the recursion alphas.
 &lt;/span&gt;    &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;time&lt;/span&gt; &lt;span class=&quot;ow&quot;&gt;in&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;range&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;max_time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
 
-      &lt;span class=&quot;c1&quot;&gt;# Get emission scores for this time step.
+      &lt;span class=&quot;c1&quot;&gt;# Get unary features for this time step.
 &lt;/span&gt;      &lt;span class=&quot;n&quot;&gt;features&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
 
-      &lt;span class=&quot;c1&quot;&gt;# Broadcast emission probabilities.
-&lt;/span&gt;      &lt;span class=&quot;n&quot;&gt;emit_scores&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;view&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;num_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;).&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+      &lt;span class=&quot;c1&quot;&gt;# Expand the first dimension so we can broadcast it.
+&lt;/span&gt;      &lt;span class=&quot;n&quot;&gt;unary_features&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;view&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;num_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;).&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
 
-      &lt;span class=&quot;c1&quot;&gt;# Calculate transition probabilities (broadcast over example axis, same for all examples in batch).
+      &lt;span class=&quot;c1&quot;&gt;# Expand the batch dimension so we can broadcast the sum
+&lt;/span&gt;      &lt;span class=&quot;c1&quot;&gt;# over it, the transition scores are the same over the batch dimension.
 &lt;/span&gt;      &lt;span class=&quot;n&quot;&gt;transition_scores&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;log_transitions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
 
       &lt;span class=&quot;c1&quot;&gt;# Calculate next tag probabilities.
-&lt;/span&gt;      &lt;span class=&quot;n&quot;&gt;next_tag_var&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;forward_var&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;emit_scores&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;transition_scores&lt;/span&gt;
-      &lt;span class=&quot;k&quot;&gt;print&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;next_tag_var&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;shape&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/span&gt;      &lt;span class=&quot;n&quot;&gt;forward_alpha_e&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;forward_alpha&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+      &lt;span class=&quot;n&quot;&gt;next_forward_alpha&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;forward_alpha_e&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;unary_features&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;transition_scores&lt;/span&gt;
 
-      &lt;span class=&quot;c1&quot;&gt;# Calculate next forward var by taking logsumexp over next tag axis, mask all instances that ended
-&lt;/span&gt;      &lt;span class=&quot;c1&quot;&gt;# and keep old forward var for instances those.
-&lt;/span&gt;      &lt;span class=&quot;n&quot;&gt;forward_var&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;logsumexp&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;next_tag_var&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;].&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;view&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt;
-                      &lt;span class=&quot;n&quot;&gt;forward_var&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]).&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;view&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt;
+      &lt;span class=&quot;c1&quot;&gt;# Calculate next forward alpha by taking logsumexp over current tag axis, 
+&lt;/span&gt;      &lt;span class=&quot;c1&quot;&gt;# mask all instances that ended and keep the old forward alphas
+&lt;/span&gt;      &lt;span class=&quot;c1&quot;&gt;# for those instances.
+&lt;/span&gt;      &lt;span class=&quot;n&quot;&gt;forward_alpha&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;logsumexp&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;next_forward_alpha&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;].&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;view&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+        &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;forward_alpha&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]).&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;view&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+      &lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
 
     &lt;span class=&quot;n&quot;&gt;final_transitions&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;log_transitions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[:,&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;end_idx&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
 
-    &lt;span class=&quot;n&quot;&gt;alphas&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;forward_var&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;final_transitions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;alphas&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;forward_alpha&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;final_transitions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
     &lt;span class=&quot;n&quot;&gt;partition_function&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;logsumexp&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;alphas&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
 
     &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;partition_function&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/figure&gt;
+
+&lt;p&gt;The code recurses over the time dimension, from \(1\) to \(m\), and calculates the alphas in log-space.
+The first important line is the following:&lt;/p&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;next_forward_alpha = forward_alpha_e + unary_features + transition_scores&lt;/code&gt;&lt;/p&gt;
+
+&lt;p&gt;This line basically calculates the recursion above without the &lt;em&gt;logsumexp&lt;/em&gt;-ing:&lt;/p&gt;
+
+\[\underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \underbrace{\boldsymbol{\theta}_2(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{\alpha}(t-1, y^{\prime}_t)}_{\text{forward_alpha_e}}\]
+
+&lt;p&gt;But then for all possible POS tags \(y^{\prime}_t\). This is where we use broadcasting. Then if we logsumexp over the first dimension:&lt;/p&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;logsumexp(next_forward_alpha, 1)&lt;/code&gt;&lt;/p&gt;
+
+&lt;p&gt;We get our subsequent alpha recursion variables for all \(y^{\prime}_{t+1}\). The following image shows what happens
+in these two lines of code for a single example in a batch graphically:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/images/broadcast_forward.png&quot; alt=&quot;broadcast_forward&quot; width=&quot;800&quot; class=&quot;center&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;Note that we add the transition from each tag to the final tag outside of the loop over time, because these are independent
+of time and should happen for every sequence in the batch. Then the whole function returns:&lt;/p&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;logsumexp(alphas)&lt;/code&gt; which is \(Z(\mathbf{x}) = \sum_{y^{\prime}_m}\hat{\alpha}(m-1, y^{\prime}_m)\).&lt;/p&gt;
+
+&lt;p&gt;Yay, that’s calculating the partition function! Now let’s look at calculating the nominator of the CRF,
+or the function &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF.score_sentence(...)&lt;/code&gt;.&lt;/p&gt;
+
+&lt;h1 id=&quot;calculating-the-nominator&quot;&gt;&lt;span style=&quot;color:#C0392B&quot;&gt;Calculating the Nominator&lt;/span&gt;&lt;/h1&gt;
+
+&lt;p&gt;Meep Morp Beep.&lt;/p&gt;
+
+&lt;figure class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-python&quot; data-lang=&quot;python&quot;&gt;&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;score_sentence&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                        &lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+                        &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;max_time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;feature_dimension&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+
+        &lt;span class=&quot;c1&quot;&gt;# Make time major.
+&lt;/span&gt;        &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;transpose&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# (time, batch_size, dim)
+&lt;/span&gt;        &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;float&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;transpose&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# (time, batch_size)
+&lt;/span&gt;        &lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;transpose&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# (time, batch_size)
+&lt;/span&gt;
+        &lt;span class=&quot;c1&quot;&gt;# Get tensor of root tokens and tensor of next tags (first tags).
+&lt;/span&gt;        &lt;span class=&quot;n&quot;&gt;root_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;LongTensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;([&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;root_idx&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;cuda&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;is_available&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;():&lt;/span&gt;
+          &lt;span class=&quot;n&quot;&gt;root_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;to&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;device&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;next_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;].&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;squeeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+
+        &lt;span class=&quot;c1&quot;&gt;# Initial transition is from root token to first tags.
+&lt;/span&gt;        &lt;span class=&quot;n&quot;&gt;initial_transition&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;log_transitions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;root_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;next_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+
+        &lt;span class=&quot;c1&quot;&gt;# Initialize scores.
+&lt;/span&gt;        &lt;span class=&quot;n&quot;&gt;scores&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;initial_transition&lt;/span&gt;
+
+        &lt;span class=&quot;c1&quot;&gt;# Loop over time and at each time calculate the score from t to t + 1.
+&lt;/span&gt;        &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;time&lt;/span&gt; &lt;span class=&quot;ow&quot;&gt;in&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;range&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;max_time&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+
+            &lt;span class=&quot;c1&quot;&gt;# Get emission scores, transition scores and calculate score for current time step.
+&lt;/span&gt;            &lt;span class=&quot;n&quot;&gt;features_t&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+            &lt;span class=&quot;n&quot;&gt;next_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;].&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;squeeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+            &lt;span class=&quot;n&quot;&gt;current_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;].&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;squeeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+            &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;len&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;current_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;shape&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+              &lt;span class=&quot;n&quot;&gt;current_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;current_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+            &lt;span class=&quot;n&quot;&gt;emission&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;gather&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;features_t&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;current_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)).&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;squeeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+            &lt;span class=&quot;n&quot;&gt;transition&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;log_transitions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;current_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;next_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+
+            &lt;span class=&quot;c1&quot;&gt;# Add scores.
+&lt;/span&gt;            &lt;span class=&quot;n&quot;&gt;scores&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;scores&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;transition&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;emission&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+
+        &lt;span class=&quot;c1&quot;&gt;# Add scores for transitioning to stop tag.
+&lt;/span&gt;        &lt;span class=&quot;n&quot;&gt;last_tag_index&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;sum&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;).&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;long&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;last_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;gather&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;last_tag_index&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;view&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)).&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;view&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+
+        &lt;span class=&quot;c1&quot;&gt;# end_tags
+&lt;/span&gt;        &lt;span class=&quot;n&quot;&gt;end_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;LongTensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;([&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;end_idx&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;batch_size&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;end_tags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;end_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;to&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;device&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;cuda&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;is_available&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;else&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;end_tags&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;last_transition&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;log_transitions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;last_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;end_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+
+        &lt;span class=&quot;c1&quot;&gt;# Add the last input if its not masked.
+&lt;/span&gt;        &lt;span class=&quot;n&quot;&gt;last_inputs&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;last_input_score&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;last_inputs&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;gather&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;last_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;view&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;last_input_score&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;last_input_score&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;squeeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+
+        &lt;span class=&quot;n&quot;&gt;scores&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;scores&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;last_transition&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;last_input_score&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+
+        &lt;span class=&quot;c1&quot;&gt;# Sum over sequence length.
+&lt;/span&gt;        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;scores&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/figure&gt;
 
 &lt;h1 id=&quot;sources&quot;&gt;&lt;span style=&quot;color:#2874A6&quot;&gt;Sources&lt;/span&gt;&lt;/h1&gt;
 
@@ -417,7 +620,11 @@ The &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;log_trans
     &lt;a href=&quot;https://www.aclweb.org/anthology/L14-1067/&quot; target=&quot;_blank&quot;&gt;&lt;em&gt;A Gold Standard Dependency Corpus for English&lt;/em&gt;&lt;/a&gt;&lt;/p&gt;
 
 &lt;p&gt;Xuezhe Ma and Eduard H. Hovy. 2016. &lt;a href=&quot;https://arxiv.org/pdf/1603.01354.pdf&quot; target=&quot;_blank&quot;&gt;&lt;em&gt;End-to-end
-sequence labeling via bi-directional LSTM-CNNsCRF&lt;/em&gt;&lt;/a&gt;. In ACL.&lt;/p&gt;</content><author><name></name></author><summary type="html"></summary></entry><entry><title type="html">Structured Prediction Pt. 1 - Linear-chain CRF</title><link href="/2021/01/25/crfpt1.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 1 - Linear-chain CRF" /><published>2021-01-25T00:00:00-05:00</published><updated>2021-01-25T00:00:00-05:00</updated><id>/2021/01/25/crfpt1</id><content type="html" xml:base="/2021/01/25/crfpt1.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+sequence labeling via bi-directional LSTM-CNN-CRF&lt;/em&gt;&lt;/a&gt;. In ACL.&lt;/p&gt;
+
+&lt;h1 id=&quot;further-reading&quot;&gt;&lt;span style=&quot;color:#2874A6&quot;&gt;Further Reading&lt;/span&gt;&lt;/h1&gt;
+
+&lt;p&gt;…&lt;/p&gt;</content><author><name></name></author><summary type="html"></summary></entry><entry><title type="html">Structured Prediction Pt. 1 - Linear-chain CRF</title><link href="/2021/01/25/crfpt1.html" rel="alternate" type="text/html" title="Structured Prediction Pt. 1 - Linear-chain CRF" /><published>2021-01-25T00:00:00-05:00</published><updated>2021-01-25T00:00:00-05:00</updated><id>/2021/01/25/crfpt1</id><content type="html" xml:base="/2021/01/25/crfpt1.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
 
 &lt;p&gt;You’re looking at part 1 of a series of posts about &lt;em&gt;structured prediction with conditional random fields&lt;/em&gt;. In this post, we’ll talk about linear-chain
 CRFs applied to part-of-speech (POS) tagging. In POS tagging, we label all words with a particular class, like verb or noun.
@@ -534,8 +741,8 @@ inference methods like belief propagation. Let’s take a look at the log-likeli
 
 \[\begin{aligned}
 \log \mathcal{L}(\boldsymbol{\theta}) &amp;amp;= \log{\prod_{i=1}^N p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}, \boldsymbol{\theta}) } =  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})}\prod_{t=1}^m \psi (y_t^{(i)}, \mathbf{x}_t^{(i)}, t) \prod_{t=1}^{m-1} \psi (y_t^{(i)}, y_{t+1}^{(i)}) \Bigg]} \\
-    &amp;amp;=  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} \\
-    &amp;amp;= \log{\Bigg[\prod_{i=1}^N \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} + \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \Bigg]} \\
+    &amp;amp;=  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \exp\Bigg(\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg)\Bigg]} \\
+    &amp;amp;= \log{\Bigg[\prod_{i=1}^N \exp\Bigg(\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg)\Bigg]} + \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \Bigg]} \\
     &amp;amp;= \sum_{i=1}^{N}\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)}) - \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) \\
 \end{aligned}\]
 
@@ -701,9 +908,7 @@ v(t, y^{\prime}_{t+1}) &amp;amp;\leftarrow \max_{y^{\prime}_{t}}\psi(y^{\prime}_
 \end{aligned}\]
 
 &lt;p&gt;Note that again here, we are using the conditional independence relations for efficient decoding. If there were no conditional independence relations,
-we would unfortunately need to calculate the probability of all possible sequences, but now that we know that each \(y_t\) is conditionally independent of 
-\(y_{t-2},\dots,y_1\) given \(y_{t-1}\), we can use the fact that if \(p(y_t, y_{t+1} \mid \mathbf{x})\) is maximized for \(\hat{y}_t\) and \(\hat{y}_{t+1}\),
- that will also be true for the entire sequence \(p(\mathbf{y} \mid \mathbf{x})\). In the below animation we can see the computations done in the forward- and backward-pass of Viterbi. We initialize the leftmost
+we would unfortunately need to calculate the likelihood of all possible sequences, but here we use it to our advantage and recursively maximize. In the below animation we can see the computations done in the forward- and backward-pass of Viterbi. We initialize the leftmost
 green boxes by taking the maximum of the initial values \(\max_{y^{\prime}_1}\bar{p}(y^{\prime}_1 \mid \mathbf{x}) = \max_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})\).
 At the final column we can start actually decoding and decide what the maximizing final POS tag is: \(\hat{y}^{\prime}_m = arg\max_{y^{\prime}_m}\psi(y^{\prime}_m) \cdot v_{m-1}(y^{\prime}_m)\).
  This also gives us the backpointer to follow to get the best path backwards, giving the maximizing sequence: \(\hat{y}^{\prime}_t \leftarrow \overleftarrow{v}_t(\hat{y}^{\prime}_{t+1})\)  \(\forall t \in \{m-1, 1\}\).&lt;/p&gt;

@@ -93,6 +93,7 @@ $$
 \begin{aligned}
 p(\mathbf{y} \mid \mathbf{x}) &= \frac{1}{Z(\mathbf{x})} \prod_{t=1}^{m} \psi(y_t, \mathbf{x}, t) \prod_{t=1}^{m-1}\psi(y_t, y_{t+1}) \\
  \end{aligned}$$
+
  
 Additionally, what makes a CRF a CRF is that it's simply a specific way of choosing the factors, or in other
 words feature functions. The CRF-way of defining the factors is taking an exponential of a linear combination of 
@@ -121,8 +122,8 @@ inference methods like belief propagation. Let's take a look at the log-likeliho
 $$
 \begin{aligned}
 \log \mathcal{L}(\boldsymbol{\theta}) &= \log{\prod_{i=1}^N p(\mathbf{y}^{(i)} \mid \mathbf{x}^{(i)}, \boldsymbol{\theta}) } =  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})}\prod_{t=1}^m \psi (y_t^{(i)}, \mathbf{x}_t^{(i)}, t) \prod_{t=1}^{m-1} \psi (y_t^{(i)}, y_{t+1}^{(i)}) \Bigg]} \\
-    &=  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} \\
-    &= \log{\Bigg[\prod_{i=1}^N \exp\Bigg\{\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg\}\Bigg]} + \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \Bigg]} \\
+    &=  \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \exp\Bigg(\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg)\Bigg]} \\
+    &= \log{\Bigg[\prod_{i=1}^N \exp\Bigg(\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\Bigg)\Bigg]} + \log{\Bigg[\prod_{i=1}^N \frac{1}{Z(\mathbf{x}^{(i)})} \Bigg]} \\
     &= \sum_{i=1}^{N}\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}_t^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)}) - \sum_{i=1}^{N}\log\left(Z(\mathbf{x}^{(i)})\right) \\
 \end{aligned}
 $$
@@ -311,9 +312,7 @@ v(t, y^{\prime}_{t+1}) &\leftarrow \max_{y^{\prime}_{t}}\psi(y^{\prime}_t, \math
 $$
 
 Note that again here, we are using the conditional independence relations for efficient decoding. If there were no conditional independence relations,
-we would unfortunately need to calculate the probability of all possible sequences, but now that we know that each $$y_t$$ is conditionally independent of 
-$$y_{t-2},\dots,y_1$$ given $$y_{t-1}$$, we can use the fact that if $$p(y_t, y_{t+1} \mid \mathbf{x})$$ is maximized for $$\hat{y}_t$$ and $$\hat{y}_{t+1}$$,
- that will also be true for the entire sequence $$p(\mathbf{y} \mid \mathbf{x})$$. In the below animation we can see the computations done in the forward- and backward-pass of Viterbi. We initialize the leftmost
+we would unfortunately need to calculate the likelihood of all possible sequences, but here we use it to our advantage and recursively maximize. In the below animation we can see the computations done in the forward- and backward-pass of Viterbi. We initialize the leftmost
 green boxes by taking the maximum of the initial values $$\max_{y^{\prime}_1}\bar{p}(y^{\prime}_1 \mid \mathbf{x}) = \max_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})$$.
 At the final column we can start actually decoding and decide what the maximizing final POS tag is: $$\hat{y}^{\prime}_m = arg\max_{y^{\prime}_m}\psi(y^{\prime}_m) \cdot v_{m-1}(y^{\prime}_m)$$.
  This also gives us the backpointer to follow to get the best path backwards, giving the maximizing sequence: $$\hat{y}^{\prime}_t \leftarrow \overleftarrow{v}_t(\hat{y}^{\prime}_{t+1}) $$  $$\forall t \in \{m-1, 1\}$$.

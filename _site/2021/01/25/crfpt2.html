@@ -55,6 +55,14 @@ the dependencies among labels in sequence prediction tasks with a linear-chain C
 on top of a neural network feature extractor and use it for
 part-of-speech (POS) tagging.</p>
 
+<p>Everything below is inspired by <a href="https://arxiv.org/abs/1603.01354" target="_blank">this paper</a> by Ma &amp; Hovy,
+and the implementation has lots of parts that come from
+<a href="https://github.com/allenai/allennlp/blob/main/allennlp/modules/conditional_random_field.py" target="_blank">the AllenNLP implementation</a>,
+so if it’s simply a good implementation you’re looking for, take a look at that one. If you’d like to understand how it works from scratch, keep on reading. Bear with me here,
+I discuss everything rather in detail and try not to skip over anything, from batching and broadcasting to changing the forward-recursion of BP for a cleaner implementation and Viterbi,
+so if you rather want a succint blogpost you might want to choose one of the great other options that are also out there! Alternatively, there are some sections you can skip
+if they’re clear, like batching and broadcasting.</p>
+
 <p><img src="/images/opener_gif/opener.gif" alt="annotated_example" /></p>
 
 <p>To learn a model that can annotate examples like the one above with POS tags, we need two things:</p>
@@ -267,9 +275,9 @@ first tag of a sequence, and the probability of a tag being the last tag. For th
 </ul>
 
 <p>Below, you’ll find the <code class="language-plaintext highlighter-rouge">ChainCRF</code> class that holds all these methods. The matrix of transition probabilities \(\mathbf{T}\)
-is initialized below as <code class="language-plaintext highlighter-rouge">log_transitions</code> (in log-space, so the matrix <code class="language-plaintext highlighter-rouge">log_transitions</code> corresponds to \(\log\mathbf{T}\)), and we hard-code the transition probabilities from any \(y_t\) to the <code class="language-plaintext highlighter-rouge">&lt;ROOT&gt;</code>
-tag to be -10000 because this should not be possible (remember that to go from log-probabilities to probabilities we do <code class="language-plaintext highlighter-rouge">exp(log_transitions)</code> and \(\exp-10000 \approx 0\)).
-We do the same for any transition from <code class="language-plaintext highlighter-rouge">&lt;EOS&gt;</code> to any other tag. In the sections below we will implement the necessary methods for our linear-chain CRF, starting with belief propagation.</p>
+is initialized below as <code class="language-plaintext highlighter-rouge">log_transitions</code> (note that \(\mathbf{T}\) are actually the log-transition probabilities because in the CRF equations they are \(\exp(\boldsymbol{\theta}_2f(y_t, y_{t+1})) = \exp\mathbf{T}_{y_t,y_{t+1}}\)), and we hard-code the transition probabilities from any \(y_t\) to the <code class="language-plaintext highlighter-rouge">&lt;ROOT&gt;</code>
+tag to be -10000 because this should not be possible (and this becomes 0 in the CRF equation: <code class="language-plaintext highlighter-rouge">exp(log_transitions)</code> gives \(\exp-10000 \approx 0\)).
+We do the same for any transition from <code class="language-plaintext highlighter-rouge">&lt;EOS&gt;</code> to any other tag. The class below implements the methods to calculate the NLL loss, and the total forward-pass of the CRF that returns this loss as well as a predicted tag sequence. In the sections below we will implement the necessary methods for our linear-chain CRF, starting with belief propagation.</p>
 
 <figure class="highlight"><pre><code class="language-python" data-lang="python"> <span class="k">class</span> <span class="nc">ChainCRF</span><span class="p">(</span><span class="n">nn</span><span class="p">.</span><span class="n">Module</span><span class="p">):</span>
       <span class="s">"""
@@ -311,7 +319,9 @@ We do the same for any transition from <code class="language-plaintext highlight
         <span class="k">raise</span> <span class="nb">NotImplementedError</span><span class="p">()</span>
           
       <span class="k">def</span> <span class="nf">viterbi_decode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_features</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
-                               <span class="n">input_lengths</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">):</span>
+                               <span class="n">input_lengths</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span>
+                                                        <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span>
+                                                        <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">]:</span>
         <span class="k">raise</span> <span class="nb">NotImplementedError</span><span class="p">()</span>
       
       <span class="k">def</span> <span class="nf">negative_log_likelihood</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_features</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
@@ -379,21 +389,128 @@ The input mask for the above batch looks like this:</p>
 
 <p><img src="/images/input_mask.png" alt="input_mask" /></p>
 
-<h1 id="forward-belief-propagation"><span style="color:#C0392B">Forward Belief Propagation</span></h1>
+<h1 id="implementation-in-log-space-stable-logsumexp-ing--broadcasting"><span style="color:#C0392B">Implementation in log-space, stable ‘‘logsumexp-ing’’ &amp; broadcasting</span></h1>
 
-<p>In this section we will implement the forward-pass of belief propagation, which we need to calculate part of the NLL loss (namely \(\log\left(Z(\mathbf{x}^{(i)})\right)\)). We will do this in log-space, because numerical stability doesn’t fare well with
-recursive multiplication of probabilities (i.e., values between 0 and 1). In log-space, multiplications become summations, which have less of a risk of becoming too small.</p>
-
-<p>Recall that the initialization and recursion in the forward-pass of belief propagation are given by the following equations:</p>
+<p>Before we can finally get into the interesting implementations, we need to talk about two things. Firstly,
+for calculating the partition function we are going to need to sum a bunch of \(exp(\cdot)\)’s, which might explode.
+To do this numerically stable, we will use the <em>logsumexp</em>-trick. The log here comes from the fact that we will implement
+everything in log-space. Numerical stability doesn’t fare well with
+recursive multiplication of small values (i.e., values between 0 and 1) or large values. 
+In log-space, multiplications become summations, which have less of a risk of becoming too small or too large.
+Recall that the initialization and recursion in the forward-pass of belief propagation are given by the following equations:</p>
 
 \[\begin{aligned}
 \alpha(1, y^{\prime}_2) &amp;= \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
 \alpha(t, y^{\prime}_{t+1}) &amp;\leftarrow \sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \alpha(t-1, y^{\prime}_t)
 \end{aligned}\]
 
-<p>We discussed above that \(\psi(y^{\prime}_t, \mathbf{x}, t) = \mathbf{H}_{t,y_t}\) (the t-th row and \(y_t\)-th column of the projected output of our encoder) and that \(\psi(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\)
-(the \(y_t\)-th row and \(y_{t+1}\)-th columnd of the matrix of transition probabilities). So in the code <code class="language-plaintext highlighter-rouge">input_features</code> is a batch with \(\mathbf{H} \in \mathbb{R}^{m \times |S|}\) for each data point. 
-The <code class="language-plaintext highlighter-rouge">log_transitions</code>, or \(\log\mathbf{T}_{y_t,y_{t+1}}\), on the other hand, are the same for each example in the batch.</p>
+<p>First we convert the alpha initialization to log-space:</p>
+
+\[\begin{aligned}
+\alpha(1, y^{\prime}_2) &amp;= \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\log \alpha(1, y^{\prime}_2) &amp;= \log \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\end{aligned}\]
+
+<p>Then we convert the recursion equation to log-space, we plug in the CRF factors, and we see why we
+get a <em>logsumexp</em>:</p>
+
+\[\begin{aligned}
+\log \alpha(t, y^{\prime}_{t+1}) &amp;\leftarrow \log \sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\alpha(t-1, y^{\prime}_t) \\
+\log \alpha(t, y^{\prime}_{t+1}) &amp;\leftarrow \log \sum_{y^{\prime}_{t}}\exp\left(\boldsymbol{\theta}_1f(y^{\prime}_t, \mathbf{x}, t) + \boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1})\right) \cdot \exp\log\alpha(t-1, y^{\prime}_t) \\
+\log \alpha(t, y^{\prime}_{t+1}) &amp;\leftarrow \underbrace{\log \sum_{y^{\prime}_{t}}\exp}_{\text{logsumexp}}\left(\boldsymbol{\theta}_1f(y^{\prime}_t, \mathbf{x}, t) + \boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) + \log\alpha(t-1, y^{\prime}_t)\right)
+\end{aligned}\]
+
+<p>Now what <em>logsumexp</em> does is rewrite this as follows. Let everything inside the \(exp(\cdot)\) above for simplicity be \(q_t\):</p>
+
+\[\begin{aligned}
+\log \sum_{y^{\prime}_{t}}\exp(q_t) &amp;= \log \sum_{y^{\prime}_{t}}\exp(q_t - c + c) \\
+&amp;= \log \sum_{y^{\prime}_{t}}\exp(q_t - c)\exp(c) \\
+&amp;= \log \exp(c)\sum_{y^{\prime}_{t}}\exp(q_t - c) \\
+&amp;= c + \log\sum_{y^{\prime}_{t}}\exp(q_t - c) \\
+\end{aligned}\]
+
+<p>If we take the constant \(c\) to be the maximum value that \(q_t\) can take in the sum, the summation becomes stable.
+See below the code that implements this, adapted from AllenNLP.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">logsumexp</span><span class="p">(</span><span class="n">tensor</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">dim</span><span class="p">:</span> <span class="nb">int</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">:</span>
+    <span class="s">"""
+    A numerically stable computation of logsumexp. This is mathematically
+    equivalent to `tensor.exp().sum(dim).log()`. 
+    This function is typically used for summing log probabilities.
+    :param tensor: A tensor of arbitrary size.
+    :param dim: The dimension of the tensor to apply the logsumexp to.
+    """</span>
+    <span class="n">max_score</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">tensor</span><span class="p">.</span><span class="nb">max</span><span class="p">(</span><span class="n">dim</span><span class="p">)</span>
+    <span class="n">stable_vec</span> <span class="o">=</span> <span class="n">tensor</span> <span class="o">-</span> <span class="n">max_score</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="n">dim</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">max_score</span> <span class="o">+</span> <span class="p">(</span><span class="n">stable_vec</span><span class="p">.</span><span class="n">exp</span><span class="p">().</span><span class="nb">sum</span><span class="p">(</span><span class="n">dim</span><span class="p">)).</span><span class="n">log</span><span class="p">()</span></code></pre></figure>
+
+<p>Broadcasting over dimensions is conceptually the same thing as matrix multiplication of a column vector with a row vector,
+but then by summing. For example, if we sum <code class="language-plaintext highlighter-rouge">a + b = c</code> where \(a \in \mathbb{R}^{2 \times 1}\) and \(b \in \mathbb{R}^{1 \times 2}\)
+the result will be \(c \in \mathbb{R}^{2 \times 2}\):</p>
+
+\[\begin{pmatrix}
+1\\ 
+2\\ 
+\end{pmatrix} + \begin{pmatrix}
+3 &amp; 4
+\end{pmatrix} = \begin{pmatrix}
+4 &amp; 5\\ 
+5 &amp; 6
+\end{pmatrix}\]
+
+<p>You can use broadcasting if you have a value that you want to add to every index of a vector, like
+in the above case 1 is added to 3 and 4 for the top row and 2 to 3 and 4 for the bottom row.</p>
+
+<h1 id="forward-belief-propagation"><span style="color:#C0392B">Forward Belief Propagation</span></h1>
+
+<p>In this section we will implement the forward-pass of belief propagation, which we need to calculate part of the NLL loss (namely \(\log\left(Z(\mathbf{x}^{(i)})\right)\)).</p>
+
+<p>We are implementing the forward recursion in a batched version, meaning that the loop over time goes from
+\(t=1\) to \(m-1\) for the largest \(m\) in the batch. Some sequences might already end somewhere earlier in the loop,
+which is why we will mask out the recursion for those sequences and retain the old \(\alpha\) variables for them.
+Implementing batched forward belief propagation becomes <em>a lot</em> easier if we instead of using the recursion
+equation as defined above, use the following recursion:</p>
+
+\[\begin{aligned}
+\hat{\alpha}(1, y^{\prime}_2) &amp;= \psi(y^{\prime}_2, \mathbf{x}, 2)\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\hat{\alpha}(t, y^{\prime}_{t+1}) &amp;\leftarrow \psi(y^{\prime}_{t+1}, \mathbf{x}, t+1)\sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \hat{\alpha}(t-1, y^{\prime}_t)
+\end{aligned}\]
+
+<p>Why this is equivalent in the end becomes apparent when we look at the full partition function that we’re trying to compute.
+We simply already take the unary features \(\psi(y_2^{\prime}, \mathbf{x}, 2)\) for the next recursion.</p>
+
+\[\begin{aligned}
+Z(\mathbf{x}) &amp;= \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m)\sum_{y^{\prime}_{m-1}}\psi(y^{\prime}_{m-1}, \mathbf{x}, m-1)\psi(y^{\prime}_{m-1}, y^{\prime}_{m}) \dots \dots \\ 
+&amp; \quad \quad \quad \dots \sum_{y^{\prime}_2}\psi(y^{\prime}_2, \mathbf{x}, 2) \cdot  \psi(y^{\prime}_2, y^{\prime}_{3})\underbrace{\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})}_{\alpha(1, y^{\prime}_{2})} \\
+&amp;= \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m)\sum_{y^{\prime}_{m-1}}\psi(y^{\prime}_{m-1}, \mathbf{x}, m-1)\psi(y^{\prime}_{m-1}, y^{\prime}_{m}) \dots \dots \\ 
+&amp; \quad \quad \quad \dots \sum_{y^{\prime}_2} \psi(y^{\prime}_2, y^{\prime}_{3}) \cdot \underbrace{\psi(y^{\prime}_2, \mathbf{x}, 2)\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})}_{\hat{\alpha}(1, y^{\prime}_{2})}
+\end{aligned}\]
+
+<p>Remember that in the forward recursion of BP we looped until \(m-1\), and then for time \(m\) we don’t have transition probabilities to \(m+1\) anymore, so we separately did the following:</p>
+
+\[Z(\mathbf{x}) = \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot\alpha(m-1, y^{\prime}_m)\]
+
+<p>The new recursion results in much easier code because instead of separately keeping track of when each sequence in the batch
+ends and writing an if-else statement within the loop over time that calculates the above equations for the sequences that
+are ending, we simply already incorporate the unary features of \(y_{t+1}^{\prime}\) in each recursive calculation.
+Then, at the end we only need to sum all new alphas:</p>
+
+\[Z(\mathbf{x}) = \sum_{y^{\prime}_m}\hat{\alpha}(m-1, y^{\prime}_m)\]
+
+<p>The equations we are going to implement now are these recursions in log-space. In the equation below I’ve annotated
+every part of the equations with the corresponding variable name their values are a part of in the implementation below.</p>
+
+\[\begin{aligned}
+\log\hat{\alpha}(1, y^{\prime}_2) &amp;= \log\psi(y^{\prime}_2, \mathbf{x}, 2) + \log\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\log\hat{\alpha}(t, y^{\prime}_{t+1}) &amp;\leftarrow \log\left(\psi(y^{\prime}_{t+1}, \mathbf{x}, t+1)\sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\hat{\alpha}(t-1, y^{\prime}_t)\right) \\
+&amp;\leftarrow \log\left(\sum_{y^{\prime}_{t}}\psi(y^{\prime}_{t+1}, \mathbf{x}, t+1) \cdot \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\hat{\alpha}(t-1, y^{\prime}_t)\right) \\
+&amp;\leftarrow \log\left(\sum_{y^{\prime}_{t}}\exp\left(\underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \underbrace{\boldsymbol{\theta}_2(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{\alpha}(t-1, y^{\prime}_t)}_{\text{forward_alpha_e}}\right)\right) \\
+\end{aligned}\]
+
+<p>We discussed above that \(\boldsymbol{\theta}_1f(y^{\prime}_t, \mathbf{x}, t) = \mathbf{H}_{t,y_t}\) is the t-th row and \(y_t\)-th column of the projected output of our encoder. These values are collected in a vector called <code class="language-plaintext highlighter-rouge">unary_features</code> for all \(y^{\prime}_t\) (meaning the vector has size \(|S|\)). Then \(\boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\)
+is the \(y_t\)-th row and \(y_{t+1}\)-th column of the matrix of transition probabilities. The vector <code class="language-plaintext highlighter-rouge">transition_scores</code> in the code holds the probabilities from all \(y_t\)’s to a particular \(y_{t+1}\).</p>
+
+<p>Now let’s take a look at the code that implements all this. Below the code we’ll go through some clarifications.</p>
 
 <figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">forward_belief_propagation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_features</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
                                      <span class="n">input_mask</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">)</span>
@@ -406,58 +523,144 @@ The <code class="language-plaintext highlighter-rouge">log_transitions</code>, o
     """</span>
     <span class="n">batch_size</span><span class="p">,</span> <span class="n">sequence_length</span><span class="p">,</span> <span class="n">num_tags</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">.</span><span class="n">size</span><span class="p">()</span>
     
-    <span class="c1"># We don't have input features for the tags &lt;ROOT&gt; and &lt;EOS&gt;, so artifially
-</span>    <span class="c1"># construct those.
+    <span class="c1"># We don't have input features for the tags &lt;ROOT&gt; and &lt;EOS&gt;, 
+</span>    <span class="c1"># so we artifially add those at the tag-dimension. 
+</span>    <span class="c1"># See in the class constructor above that the last 
+</span>    <span class="c1"># two indices are for the &lt;ROOT&gt; and &lt;EOS&gt; tags.
 </span>    <span class="n">input_features</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">cat</span><span class="p">(</span>
         <span class="p">[</span><span class="n">input_features</span><span class="p">,</span> <span class="n">torch</span><span class="p">.</span><span class="n">zeros</span><span class="p">([</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">sequence_length</span><span class="p">,</span> <span class="mi">2</span><span class="p">])</span> <span class="o">-</span> <span class="mf">10000.</span><span class="p">],</span>
         <span class="n">dim</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
 
     <span class="c1"># Initialize the recursion variables with 
-</span>    <span class="c1"># transitions from root token + first emission probabilities.
+</span>    <span class="c1"># transitions from root token + first unary features.
 </span>    <span class="n">init_alphas</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[</span><span class="bp">self</span><span class="p">.</span><span class="n">root_idx</span><span class="p">,</span> <span class="p">:]</span> <span class="o">+</span> <span class="n">input_features</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>
 
     <span class="c1"># Set recursion variable.
-</span>    <span class="n">forward_var</span> <span class="o">=</span> <span class="n">init_alphas</span>
+</span>    <span class="n">forward_alpha</span> <span class="o">=</span> <span class="n">init_alphas</span>
 
-    <span class="c1"># Make time major.
+    <span class="c1"># Make time major, we will loop over the time-dimension.
 </span>    <span class="n">input_features</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">input_features</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
     <span class="c1"># input_features: [sequence_length, batch_size, num_tags]
 </span>    <span class="n">input_mask</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">input_mask</span><span class="p">.</span><span class="nb">float</span><span class="p">(),</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
     <span class="c1"># input_mask [sequence_length, batch_size]
 </span>
-    <span class="c1"># Loop over sequence and calculate the transition probability for the next 
-</span>    <span class="c1"># tag at each step (from t - 1 to t)
-</span>    <span class="c1"># current tag at t - 1, next tag at t
-</span>    <span class="c1"># emission probabilities: (example, next tag)
-</span>    <span class="c1"># transition probabilities: (current tag, next tag)
-</span>    <span class="c1"># forward var: (instance, current tag)
-</span>    <span class="c1"># next tag var: (instance, current tag, next tag)
+    <span class="c1"># Loop over sequence and calculate the recursion alphas.
 </span>    <span class="k">for</span> <span class="n">time</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">max_time</span><span class="p">):</span>
 
-      <span class="c1"># Get emission scores for this time step.
+      <span class="c1"># Get unary features for this time step.
 </span>      <span class="n">features</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">[</span><span class="n">time</span><span class="p">]</span>
 
-      <span class="c1"># Broadcast emission probabilities.
-</span>      <span class="n">emit_scores</span> <span class="o">=</span> <span class="n">features</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="p">.</span><span class="n">num_tags</span><span class="p">).</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+      <span class="c1"># Expand the first dimension so we can broadcast it.
+</span>      <span class="n">unary_features</span> <span class="o">=</span> <span class="n">features</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="p">.</span><span class="n">num_tags</span><span class="p">).</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
 
-      <span class="c1"># Calculate transition probabilities (broadcast over example axis, same for all examples in batch).
+      <span class="c1"># Expand the batch dimension so we can broadcast the sum
+</span>      <span class="c1"># over it, the transition scores are the same over the batch dimension.
 </span>      <span class="n">transition_scores</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
 
       <span class="c1"># Calculate next tag probabilities.
-</span>      <span class="n">next_tag_var</span> <span class="o">=</span> <span class="n">forward_var</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="o">+</span> <span class="n">emit_scores</span> <span class="o">+</span> <span class="n">transition_scores</span>
-      <span class="k">print</span><span class="p">(</span><span class="n">next_tag_var</span><span class="p">.</span><span class="n">shape</span><span class="p">)</span>
+</span>      <span class="n">forward_alpha_e</span> <span class="o">=</span> <span class="n">forward_alpha</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+      <span class="n">next_forward_alpha</span> <span class="o">=</span> <span class="n">forward_alpha_e</span> <span class="o">+</span> <span class="n">unary_features</span> <span class="o">+</span> <span class="n">transition_scores</span>
 
-      <span class="c1"># Calculate next forward var by taking logsumexp over next tag axis, mask all instances that ended
-</span>      <span class="c1"># and keep old forward var for instances those.
-</span>      <span class="n">forward_var</span> <span class="o">=</span> <span class="p">(</span><span class="n">logsumexp</span><span class="p">(</span><span class="n">next_tag_var</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span><span class="p">].</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span>
-                      <span class="n">forward_var</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span><span class="p">]).</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+      <span class="c1"># Calculate next forward alpha by taking logsumexp over current tag axis, 
+</span>      <span class="c1"># mask all instances that ended and keep the old forward alphas
+</span>      <span class="c1"># for those instances.
+</span>      <span class="n">forward_alpha</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">logsumexp</span><span class="p">(</span><span class="n">next_forward_alpha</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span><span class="p">].</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="o">+</span> <span class="n">forward_alpha</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span><span class="p">]).</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+      <span class="p">)</span>
 
     <span class="n">final_transitions</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[:,</span> <span class="bp">self</span><span class="p">.</span><span class="n">end_idx</span><span class="p">]</span>
 
-    <span class="n">alphas</span> <span class="o">=</span> <span class="n">forward_var</span> <span class="o">+</span> <span class="n">final_transitions</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">alphas</span> <span class="o">=</span> <span class="n">forward_alpha</span> <span class="o">+</span> <span class="n">final_transitions</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
     <span class="n">partition_function</span> <span class="o">=</span> <span class="n">logsumexp</span><span class="p">(</span><span class="n">alphas</span><span class="p">)</span>
 
     <span class="k">return</span> <span class="n">partition_function</span></code></pre></figure>
+
+<p>The code recurses over the time dimension, from \(1\) to \(m\), and calculates the alphas in log-space.
+The first important line is the following:</p>
+
+<p><code class="language-plaintext highlighter-rouge">next_forward_alpha = forward_alpha_e + unary_features + transition_scores</code></p>
+
+<p>This line basically calculates the recursion above without the <em>logsumexp</em>-ing:</p>
+
+\[\underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \underbrace{\boldsymbol{\theta}_2(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{\alpha}(t-1, y^{\prime}_t)}_{\text{forward_alpha_e}}\]
+
+<p>But then for all possible POS tags \(y^{\prime}_t\). This is where we use broadcasting. Then if we logsumexp over the first dimension:</p>
+
+<p><code class="language-plaintext highlighter-rouge">logsumexp(next_forward_alpha, 1)</code></p>
+
+<p>We get our subsequent alpha recursion variables for all \(y^{\prime}_{t+1}\). The following image shows what happens
+in these two lines of code for a single example in a batch graphically:</p>
+
+<p><img src="/images/broadcast_forward.png" alt="broadcast_forward" width="800" class="center" /></p>
+
+<p>Note that we add the transition from each tag to the final tag outside of the loop over time, because these are independent
+of time and should happen for every sequence in the batch. Then the whole function returns:</p>
+
+<p><code class="language-plaintext highlighter-rouge">logsumexp(alphas)</code> which is \(Z(\mathbf{x}) = \sum_{y^{\prime}_m}\hat{\alpha}(m-1, y^{\prime}_m)\).</p>
+
+<p>Yay, that’s calculating the partition function! Now let’s look at calculating the nominator of the CRF,
+or the function <code class="language-plaintext highlighter-rouge">ChainCRF.score_sentence(...)</code>.</p>
+
+<h1 id="calculating-the-nominator"><span style="color:#C0392B">Calculating the Nominator</span></h1>
+
+<p>Meep Morp Beep.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">score_sentence</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_features</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span>
+                        <span class="n">target_tags</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
+                        <span class="n">input_mask</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">:</span>
+        <span class="n">batch_size</span><span class="p">,</span> <span class="n">max_time</span><span class="p">,</span> <span class="n">feature_dimension</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">.</span><span class="n">size</span><span class="p">()</span>
+
+        <span class="c1"># Make time major.
+</span>        <span class="n">input_features</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># (time, batch_size, dim)
+</span>        <span class="n">input_mask</span> <span class="o">=</span> <span class="n">input_mask</span><span class="p">.</span><span class="nb">float</span><span class="p">().</span><span class="n">transpose</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># (time, batch_size)
+</span>        <span class="n">target_tags</span> <span class="o">=</span> <span class="n">target_tags</span><span class="p">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># (time, batch_size)
+</span>
+        <span class="c1"># Get tensor of root tokens and tensor of next tags (first tags).
+</span>        <span class="n">root_tags</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">LongTensor</span><span class="p">([</span><span class="bp">self</span><span class="p">.</span><span class="n">root_idx</span><span class="p">]</span> <span class="o">*</span> <span class="n">batch_size</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">torch</span><span class="p">.</span><span class="n">cuda</span><span class="p">.</span><span class="n">is_available</span><span class="p">():</span>
+          <span class="n">root_tags</span><span class="p">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">next_tags</span> <span class="o">=</span> <span class="n">target_tags</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="n">squeeze</span><span class="p">()</span>
+
+        <span class="c1"># Initial transition is from root token to first tags.
+</span>        <span class="n">initial_transition</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[</span><span class="n">root_tags</span><span class="p">,</span> <span class="n">next_tags</span><span class="p">]</span>
+
+        <span class="c1"># Initialize scores.
+</span>        <span class="n">scores</span> <span class="o">=</span> <span class="n">initial_transition</span>
+
+        <span class="c1"># Loop over time and at each time calculate the score from t to t + 1.
+</span>        <span class="k">for</span> <span class="n">time</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">max_time</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+
+            <span class="c1"># Get emission scores, transition scores and calculate score for current time step.
+</span>            <span class="n">features_t</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">[</span><span class="n">time</span><span class="p">]</span>
+            <span class="n">next_tags</span> <span class="o">=</span> <span class="n">target_tags</span><span class="p">[</span><span class="n">time</span> <span class="o">+</span> <span class="mi">1</span><span class="p">].</span><span class="n">squeeze</span><span class="p">()</span>
+            <span class="n">current_tags</span> <span class="o">=</span> <span class="n">target_tags</span><span class="p">[</span><span class="n">time</span><span class="p">].</span><span class="n">squeeze</span><span class="p">()</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">current_tags</span><span class="p">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+              <span class="n">current_tags</span> <span class="o">=</span> <span class="n">current_tags</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">emission</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="n">features_t</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">current_tags</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)).</span><span class="n">squeeze</span><span class="p">()</span>
+            <span class="n">transition</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[</span><span class="n">current_tags</span><span class="p">,</span> <span class="n">next_tags</span><span class="p">]</span>
+
+            <span class="c1"># Add scores.
+</span>            <span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span> <span class="o">+</span> <span class="n">transition</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">emission</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span><span class="p">]</span>
+
+        <span class="c1"># Add scores for transitioning to stop tag.
+</span>        <span class="n">last_tag_index</span> <span class="o">=</span> <span class="n">input_mask</span><span class="p">.</span><span class="nb">sum</span><span class="p">(</span><span class="mi">0</span><span class="p">).</span><span class="nb">long</span><span class="p">()</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="n">last_tags</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="n">target_tags</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">last_tag_index</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">)).</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># end_tags
+</span>        <span class="n">end_tags</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">LongTensor</span><span class="p">([</span><span class="bp">self</span><span class="p">.</span><span class="n">end_idx</span><span class="p">]</span> <span class="o">*</span> <span class="n">batch_size</span><span class="p">)</span>
+        <span class="n">end_tags</span> <span class="o">=</span> <span class="n">end_tags</span><span class="p">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span> <span class="k">if</span> <span class="n">torch</span><span class="p">.</span><span class="n">cuda</span><span class="p">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="n">end_tags</span>
+        <span class="n">last_transition</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[</span><span class="n">last_tags</span><span class="p">,</span> <span class="n">end_tags</span><span class="p">]</span>
+
+        <span class="c1"># Add the last input if its not masked.
+</span>        <span class="n">last_inputs</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">last_input_score</span> <span class="o">=</span> <span class="n">last_inputs</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">last_tags</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="n">last_input_score</span> <span class="o">=</span> <span class="n">last_input_score</span><span class="p">.</span><span class="n">squeeze</span><span class="p">()</span>
+
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span> <span class="o">+</span> <span class="n">last_transition</span> <span class="o">+</span> <span class="n">last_input_score</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="c1"># Sum over sequence length.
+</span>        <span class="k">return</span> <span class="n">scores</span></code></pre></figure>
 
 <h1 id="sources"><span style="color:#2874A6">Sources</span></h1>
 
@@ -466,7 +669,11 @@ The <code class="language-plaintext highlighter-rouge">log_transitions</code>, o
     <a href="https://www.aclweb.org/anthology/L14-1067/" target="_blank"><em>A Gold Standard Dependency Corpus for English</em></a></p>
 
 <p>Xuezhe Ma and Eduard H. Hovy. 2016. <a href="https://arxiv.org/pdf/1603.01354.pdf" target="_blank"><em>End-to-end
-sequence labeling via bi-directional LSTM-CNNsCRF</em></a>. In ACL.</p>
+sequence labeling via bi-directional LSTM-CNN-CRF</em></a>. In ACL.</p>
+
+<h1 id="further-reading"><span style="color:#2874A6">Further Reading</span></h1>
+
+<p>…</p>
 
   </div><a class="u-url" href="/2021/01/25/crfpt2.html" hidden></a>
 </article>

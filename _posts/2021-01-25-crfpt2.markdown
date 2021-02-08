@@ -10,7 +10,15 @@ In this part of the series of posts on structured prediction with conditional ra
 that were discussed in [part 1]({% post_url 2021-01-25-crfpt1 %}). Recall that we discussed how to model
 the dependencies among labels in sequence prediction tasks with a linear-chain CRF. Now, we will put a such a CRF
 on top of a neural network feature extractor and use it for
-part-of-speech (POS) tagging.
+part-of-speech (POS) tagging. 
+
+Everything below is inspired by <a href="https://arxiv.org/abs/1603.01354" target="_blank">this paper</a> by Ma & Hovy,
+and the implementation has lots of parts that come from
+<a href="https://github.com/allenai/allennlp/blob/main/allennlp/modules/conditional_random_field.py" target="_blank">the AllenNLP implementation</a>,
+so if it's simply a good implementation you're looking for, take a look at that one. If you'd like to understand how it works from scratch, keep on reading. Bear with me here,
+I discuss everything rather in detail and try not to skip over anything, from batching and broadcasting to changing the forward-recursion of BP for a cleaner implementation and Viterbi,
+so if you rather want a succint blogpost you might want to choose one of the great other options that are also out there! Alternatively, there are some sections you can skip
+if they're clear, like batching and broadcasting.
 
 ![annotated_example](/images/opener_gif/opener.gif)
 
@@ -212,9 +220,9 @@ In this part we will implement:
 - Decoding to get the target sequence prediction (`ChainCRF.viterbi_decode(...)`)
 
 Below, you'll find the `ChainCRF` class that holds all these methods. The matrix of transition probabilities $$\mathbf{T}$$
-is initialized below as `log_transitions` (in log-space, so the matrix `log_transitions` corresponds to $$\log\mathbf{T}$$), and we hard-code the transition probabilities from any $$y_t$$ to the `<ROOT>`
-tag to be -10000 because this should not be possible (remember that to go from log-probabilities to probabilities we do `exp(log_transitions)` and $$\exp-10000 \approx 0$$).
-We do the same for any transition from `<EOS>` to any other tag. In the sections below we will implement the necessary methods for our linear-chain CRF, starting with belief propagation.
+is initialized below as `log_transitions` (note that $$\mathbf{T}$$ are actually the log-transition probabilities because in the CRF equations they are $$\exp(\boldsymbol{\theta}_2f(y_t, y_{t+1})) = \exp\mathbf{T}_{y_t,y_{t+1}}$$), and we hard-code the transition probabilities from any $$y_t$$ to the `<ROOT>`
+tag to be -10000 because this should not be possible (and this becomes 0 in the CRF equation: `exp(log_transitions)` gives $$\exp-10000 \approx 0$$).
+We do the same for any transition from `<EOS>` to any other tag. The class below implements the methods to calculate the NLL loss, and the total forward-pass of the CRF that returns this loss as well as a predicted tag sequence. In the sections below we will implement the necessary methods for our linear-chain CRF, starting with belief propagation.
 {% highlight python %}
  class ChainCRF(nn.Module):
       """
@@ -256,7 +264,9 @@ We do the same for any transition from `<EOS>` to any other tag. In the sections
         raise NotImplementedError()
           
       def viterbi_decode(self, input_features: torch.Tensor, 
-                               input_lengths: torch.Tensor):
+                               input_lengths: torch.Tensor) -> Tuple[
+                                                        torch.Tensor,
+                                                        torch.Tensor]:
         raise NotImplementedError()
       
       def negative_log_likelihood(self, input_features: torch.Tensor, 
@@ -326,11 +336,14 @@ The input mask for the above batch looks like this:
 
 ![input_mask](/images/input_mask.png)
 
-# <span style="color:#C0392B">Forward Belief Propagation</span>
+# <span style="color:#C0392B">Implementation in log-space, stable ''logsumexp-ing'' & broadcasting</span>
 
-In this section we will implement the forward-pass of belief propagation, which we need to calculate part of the NLL loss (namely $$\log\left(Z(\mathbf{x}^{(i)})\right)$$). We will do this in log-space, because numerical stability doesn't fare well with
-recursive multiplication of probabilities (i.e., values between 0 and 1). In log-space, multiplications become summations, which have less of a risk of becoming too small.
-
+Before we can finally get into the interesting implementations, we need to talk about two things. Firstly,
+for calculating the partition function we are going to need to sum a bunch of $$exp(\cdot)$$'s, which might explode.
+To do this numerically stable, we will use the *logsumexp*-trick. The log here comes from the fact that we will implement
+everything in log-space. Numerical stability doesn't fare well with
+recursive multiplication of small values (i.e., values between 0 and 1) or large values. 
+In log-space, multiplications become summations, which have less of a risk of becoming too small or too large.
 Recall that the initialization and recursion in the forward-pass of belief propagation are given by the following equations:
 
 $$
@@ -340,9 +353,129 @@ $$
 \end{aligned}
 $$
 
-We discussed above that $$\psi(y^{\prime}_t, \mathbf{x}, t) = \mathbf{H}_{t,y_t}$$ (the t-th row and $$y_t$$-th column of the projected output of our encoder) and that $$\psi(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}$$
-(the $$y_t$$-th row and $$y_{t+1}$$-th columnd of the matrix of transition probabilities). So in the code `input_features` is a batch with $$\mathbf{H} \in \mathbb{R}^{m \times |S|}$$ for each data point. 
-The `log_transitions`, or $$\log\mathbf{T}_{y_t,y_{t+1}}$$, on the other hand, are the same for each example in the batch. 
+First we convert the alpha initialization to log-space:
+
+$$
+\begin{aligned}
+\alpha(1, y^{\prime}_2) &= \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\log \alpha(1, y^{\prime}_2) &= \log \sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\end{aligned}
+$$
+
+Then we convert the recursion equation to log-space, we plug in the CRF factors, and we see why we
+get a *logsumexp*:
+
+$$
+\begin{aligned}
+\log \alpha(t, y^{\prime}_{t+1}) &\leftarrow \log \sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\alpha(t-1, y^{\prime}_t) \\
+\log \alpha(t, y^{\prime}_{t+1}) &\leftarrow \log \sum_{y^{\prime}_{t}}\exp\left(\boldsymbol{\theta}_1f(y^{\prime}_t, \mathbf{x}, t) + \boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1})\right) \cdot \exp\log\alpha(t-1, y^{\prime}_t) \\
+\log \alpha(t, y^{\prime}_{t+1}) &\leftarrow \underbrace{\log \sum_{y^{\prime}_{t}}\exp}_{\text{logsumexp}}\left(\boldsymbol{\theta}_1f(y^{\prime}_t, \mathbf{x}, t) + \boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) + \log\alpha(t-1, y^{\prime}_t)\right)
+\end{aligned}
+$$
+
+Now what *logsumexp* does is rewrite this as follows. Let everything inside the $$exp(\cdot)$$ above for simplicity be $$q_t$$:
+
+$$
+\begin{aligned}
+\log \sum_{y^{\prime}_{t}}\exp(q_t) &= \log \sum_{y^{\prime}_{t}}\exp(q_t - c + c) \\
+&= \log \sum_{y^{\prime}_{t}}\exp(q_t - c)\exp(c) \\
+&= \log \exp(c)\sum_{y^{\prime}_{t}}\exp(q_t - c) \\
+&= c + \log\sum_{y^{\prime}_{t}}\exp(q_t - c) \\
+\end{aligned}
+$$
+
+If we take the constant $$c$$ to be the maximum value that $$q_t$$ can take in the sum, the summation becomes stable.
+See below the code that implements this, adapted from AllenNLP.
+
+{% highlight python %}
+def logsumexp(tensor: torch.Tensor, dim: int=-1) -> torch.Tensor:
+    """
+    A numerically stable computation of logsumexp. This is mathematically
+    equivalent to `tensor.exp().sum(dim).log()`. 
+    This function is typically used for summing log probabilities.
+    :param tensor: A tensor of arbitrary size.
+    :param dim: The dimension of the tensor to apply the logsumexp to.
+    """
+    max_score, _ = tensor.max(dim)
+    stable_vec = tensor - max_score.unsqueeze(dim)
+    return max_score + (stable_vec.exp().sum(dim)).log()
+{% endhighlight %}
+
+Broadcasting over dimensions is conceptually the same thing as matrix multiplication of a column vector with a row vector,
+but then by summing. For example, if we sum `a + b = c` where $$a \in \mathbb{R}^{2 \times 1}$$ and $$b \in \mathbb{R}^{1 \times 2}$$
+the result will be $$c \in \mathbb{R}^{2 \times 2}$$:
+
+$$
+\begin{pmatrix}
+1\\ 
+2\\ 
+\end{pmatrix} + \begin{pmatrix}
+3 & 4
+\end{pmatrix} = \begin{pmatrix}
+4 & 5\\ 
+5 & 6
+\end{pmatrix}
+$$
+
+You can use broadcasting if you have a value that you want to add to every index of a vector, like
+in the above case 1 is added to 3 and 4 for the top row and 2 to 3 and 4 for the bottom row.
+
+# <span style="color:#C0392B">Forward Belief Propagation</span>
+
+In this section we will implement the forward-pass of belief propagation, which we need to calculate part of the NLL loss (namely $$\log\left(Z(\mathbf{x}^{(i)})\right)$$). 
+
+We are implementing the forward recursion in a batched version, meaning that the loop over time goes from
+$$t=1$$ to $$m-1$$ for the largest $$m$$ in the batch. Some sequences might already end somewhere earlier in the loop,
+which is why we will mask out the recursion for those sequences and retain the old $$\alpha$$ variables for them.
+Implementing batched forward belief propagation becomes *a lot* easier if we instead of using the recursion
+equation as defined above, use the following recursion:
+
+$$
+\begin{aligned}
+\hat{\alpha}(1, y^{\prime}_2) &= \psi(y^{\prime}_2, \mathbf{x}, 2)\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\hat{\alpha}(t, y^{\prime}_{t+1}) &\leftarrow \psi(y^{\prime}_{t+1}, \mathbf{x}, t+1)\sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \hat{\alpha}(t-1, y^{\prime}_t)
+\end{aligned}
+$$
+
+Why this is equivalent in the end becomes apparent when we look at the full partition function that we're trying to compute.
+We simply already take the unary features $$\psi(y_2^{\prime}, \mathbf{x}, 2)$$ for the next recursion.
+
+$$
+\begin{aligned}
+Z(\mathbf{x}) &= \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m)\sum_{y^{\prime}_{m-1}}\psi(y^{\prime}_{m-1}, \mathbf{x}, m-1)\psi(y^{\prime}_{m-1}, y^{\prime}_{m}) \dots \dots \\ 
+& \quad \quad \quad \dots \sum_{y^{\prime}_2}\psi(y^{\prime}_2, \mathbf{x}, 2) \cdot  \psi(y^{\prime}_2, y^{\prime}_{3})\underbrace{\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})}_{\alpha(1, y^{\prime}_{2})} \\
+&= \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m)\sum_{y^{\prime}_{m-1}}\psi(y^{\prime}_{m-1}, \mathbf{x}, m-1)\psi(y^{\prime}_{m-1}, y^{\prime}_{m}) \dots \dots \\ 
+& \quad \quad \quad \dots \sum_{y^{\prime}_2} \psi(y^{\prime}_2, y^{\prime}_{3}) \cdot \underbrace{\psi(y^{\prime}_2, \mathbf{x}, 2)\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2})}_{\hat{\alpha}(1, y^{\prime}_{2})}
+\end{aligned}
+$$
+
+Remember that in the forward recursion of BP we looped until $$m-1$$, and then for time $$m$$ we don't have transition probabilities to $$m+1$$ anymore, so we separately did the following:
+
+$$Z(\mathbf{x}) = \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m) \cdot\alpha(m-1, y^{\prime}_m)$$
+
+The new recursion results in much easier code because instead of separately keeping track of when each sequence in the batch
+ends and writing an if-else statement within the loop over time that calculates the above equations for the sequences that
+are ending, we simply already incorporate the unary features of $$y_{t+1}^{\prime}$$ in each recursive calculation.
+Then, at the end we only need to sum all new alphas:
+
+$$Z(\mathbf{x}) = \sum_{y^{\prime}_m}\hat{\alpha}(m-1, y^{\prime}_m)$$
+
+The equations we are going to implement now are these recursions in log-space. In the equation below I've annotated
+every part of the equations with the corresponding variable name their values are a part of in the implementation below.
+
+$$
+\begin{aligned}
+\log\hat{\alpha}(1, y^{\prime}_2) &= \log\psi(y^{\prime}_2, \mathbf{x}, 2) + \log\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+\log\hat{\alpha}(t, y^{\prime}_{t+1}) &\leftarrow \log\left(\psi(y^{\prime}_{t+1}, \mathbf{x}, t+1)\sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\hat{\alpha}(t-1, y^{\prime}_t)\right) \\
+&\leftarrow \log\left(\sum_{y^{\prime}_{t}}\psi(y^{\prime}_{t+1}, \mathbf{x}, t+1) \cdot \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\hat{\alpha}(t-1, y^{\prime}_t)\right) \\
+&\leftarrow \log\left(\sum_{y^{\prime}_{t}}\exp\left(\underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \underbrace{\boldsymbol{\theta}_2(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{\alpha}(t-1, y^{\prime}_t)}_{\text{forward_alpha_e}}\right)\right) \\
+\end{aligned}
+$$
+
+We discussed above that $$\boldsymbol{\theta}_1f(y^{\prime}_t, \mathbf{x}, t) = \mathbf{H}_{t,y_t}$$ is the t-th row and $$y_t$$-th column of the projected output of our encoder. These values are collected in a vector called `unary_features` for all $$y^{\prime}_t$$ (meaning the vector has size $$|S|$$). Then $$\boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}$$
+is the $$y_t$$-th row and $$y_{t+1}$$-th column of the matrix of transition probabilities. The vector `transition_scores` in the code holds the probabilities from all $$y_t$$'s to a particular $$y_{t+1}$$. 
+
+Now let's take a look at the code that implements all this. Below the code we'll go through some clarifications.
 {% highlight python %}
 def forward_belief_propagation(self, input_features: torch.Tensor, 
                                      input_mask: torch.Tensor)
@@ -355,58 +488,146 @@ def forward_belief_propagation(self, input_features: torch.Tensor,
     """
     batch_size, sequence_length, num_tags = input_features.size()
     
-    # We don't have input features for the tags <ROOT> and <EOS>, so artifially
-    # construct those.
+    # We don't have input features for the tags <ROOT> and <EOS>, 
+    # so we artifially add those at the tag-dimension. 
+    # See in the class constructor above that the last 
+    # two indices are for the <ROOT> and <EOS> tags.
     input_features = torch.cat(
         [input_features, torch.zeros([batch_size, sequence_length, 2]) - 10000.],
         dim=2)
 
     # Initialize the recursion variables with 
-    # transitions from root token + first emission probabilities.
+    # transitions from root token + first unary features.
     init_alphas = self.log_transitions[self.root_idx, :] + input_features[:, 0]
 
     # Set recursion variable.
-    forward_var = init_alphas
+    forward_alpha = init_alphas
 
-    # Make time major.
+    # Make time major, we will loop over the time-dimension.
     input_features = torch.transpose(input_features, 0, 1)
     # input_features: [sequence_length, batch_size, num_tags]
     input_mask = torch.transpose(input_mask.float(), 0, 1)
     # input_mask [sequence_length, batch_size]
 
-    # Loop over sequence and calculate the transition probability for the next 
-    # tag at each step (from t - 1 to t)
-    # current tag at t - 1, next tag at t
-    # emission probabilities: (example, next tag)
-    # transition probabilities: (current tag, next tag)
-    # forward var: (instance, current tag)
-    # next tag var: (instance, current tag, next tag)
+    # Loop over sequence and calculate the recursion alphas.
     for time in range(1, max_time):
 
-      # Get emission scores for this time step.
+      # Get unary features for this time step.
       features = input_features[time]
 
-      # Broadcast emission probabilities.
-      emit_scores = features.view(batch_size, self.num_tags).unsqueeze(1)
+      # Expand the first dimension so we can broadcast it.
+      unary_features = features.view(batch_size, self.num_tags).unsqueeze(1)
 
-      # Calculate transition probabilities (broadcast over example axis, same for all examples in batch).
+      # Expand the batch dimension so we can broadcast the sum
+      # over it, the transition scores are the same over the batch dimension.
       transition_scores = self.log_transitions.unsqueeze(0)
 
       # Calculate next tag probabilities.
-      next_tag_var = forward_var.unsqueeze(2) + emit_scores + transition_scores
-      print(next_tag_var.shape)
+      forward_alpha_e = forward_alpha.unsqueeze(2)
+      next_forward_alpha = forward_alpha_e + unary_features + transition_scores
 
-      # Calculate next forward var by taking logsumexp over next tag axis, mask all instances that ended
-      # and keep old forward var for instances those.
-      forward_var = (logsumexp(next_tag_var, 1) * input_mask[time].view(batch_size, 1) +
-                      forward_var * (1 - input_mask[time]).view(batch_size, 1))
+      # Calculate next forward alpha by taking logsumexp over current tag axis, 
+      # mask all instances that ended and keep the old forward alphas
+      # for those instances.
+      forward_alpha = (
+        logsumexp(next_forward_alpha, 1) * input_mask[time].view(batch_size, 1)
+        + forward_alpha * (1 - input_mask[time]).view(batch_size, 1)
+      )
 
     final_transitions = self.log_transitions[:, self.end_idx]
 
-    alphas = forward_var + final_transitions.unsqueeze(0)
+    alphas = forward_alpha + final_transitions.unsqueeze(0)
     partition_function = logsumexp(alphas)
 
     return partition_function
+{% endhighlight %}
+
+The code recurses over the time dimension, from $$1$$ to $$m$$, and calculates the alphas in log-space.
+The first important line is the following:
+
+`next_forward_alpha = forward_alpha_e + unary_features + transition_scores`
+
+This line basically calculates the recursion above without the *logsumexp*-ing:
+
+$$\underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \underbrace{\boldsymbol{\theta}_2(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{\alpha}(t-1, y^{\prime}_t)}_{\text{forward_alpha_e}}$$
+
+But then for all possible POS tags $$y^{\prime}_t$$. This is where we use broadcasting. Then if we logsumexp over the first dimension:
+
+`logsumexp(next_forward_alpha, 1)`
+
+We get our subsequent alpha recursion variables for all $$y^{\prime}_{t+1}$$. The following image shows what happens
+in these two lines of code for a single example in a batch graphically:
+
+<img src="/images/broadcast_forward.png" alt="broadcast_forward" width="800" class="center"/>
+
+Note that we add the transition from each tag to the final tag outside of the loop over time, because these are independent
+of time and should happen for every sequence in the batch. Then the whole function returns:
+
+`logsumexp(alphas)` which is $$Z(\mathbf{x}) = \sum_{y^{\prime}_m}\hat{\alpha}(m-1, y^{\prime}_m)$$.
+
+Yay, that's calculating the partition function! Now let's look at calculating the nominator of the CRF,
+or the function `ChainCRF.score_sentence(...)`.
+
+# <span style="color:#C0392B">Calculating the Nominator</span>
+
+Meep Morp Beep.
+
+{% highlight python %}
+def score_sentence(self, input_features: torch.Tensor,
+                        target_tags: torch.Tensor, 
+                        input_mask: torch.Tensor) -> torch.Tensor:
+        batch_size, max_time, feature_dimension = input_features.size()
+
+        # Make time major.
+        input_features = input_features.transpose(0, 1)  # (time, batch_size, dim)
+        input_mask = input_mask.float().transpose(0, 1)  # (time, batch_size)
+        target_tags = target_tags.transpose(0, 1)  # (time, batch_size)
+
+        # Get tensor of root tokens and tensor of next tags (first tags).
+        root_tags = torch.LongTensor([self.root_idx] * batch_size)
+        if torch.cuda.is_available():
+          root_tags.to(device)
+        next_tags = target_tags[0].squeeze()
+
+        # Initial transition is from root token to first tags.
+        initial_transition = self.log_transitions[root_tags, next_tags]
+
+        # Initialize scores.
+        scores = initial_transition
+
+        # Loop over time and at each time calculate the score from t to t + 1.
+        for time in range(max_time - 1):
+
+            # Get emission scores, transition scores and calculate score for current time step.
+            features_t = input_features[time]
+            next_tags = target_tags[time + 1].squeeze()
+            current_tags = target_tags[time].squeeze()
+            if len(current_tags.shape) == 0:
+              current_tags = current_tags.unsqueeze(0)
+            emission = torch.gather(features_t, 1, current_tags.unsqueeze(1)).squeeze()
+            transition = self.log_transitions[current_tags, next_tags]
+
+            # Add scores.
+            scores = scores + transition * input_mask[time + 1] + emission * input_mask[time]
+
+        # Add scores for transitioning to stop tag.
+        last_tag_index = input_mask.sum(0).long() - 1
+        last_tags = torch.gather(target_tags, 0, last_tag_index.view(1, batch_size)).view(-1)
+
+        # end_tags
+        end_tags = torch.LongTensor([self.end_idx] * batch_size)
+        end_tags = end_tags.to(device) if torch.cuda.is_available() else end_tags
+        last_transition = self.log_transitions[last_tags, end_tags]
+
+        # Add the last input if its not masked.
+        last_inputs = input_features[-1]
+        last_input_score = last_inputs.gather(1, last_tags.view(-1, 1))
+        last_input_score = last_input_score.squeeze()
+
+        scores = scores + last_transition + last_input_score * input_mask[-1]
+
+        # Sum over sequence length.
+        return scores
 {% endhighlight %}
 
 # <span style="color:#2874A6">Sources</span>
@@ -416,4 +637,8 @@ Natalia Silveira and Timothy Dozat and Marie-Catherine de Marneffe and Samuel Bo
     <a href="https://www.aclweb.org/anthology/L14-1067/" target="_blank">*A Gold Standard Dependency Corpus for English*</a>
     
 Xuezhe Ma and Eduard H. Hovy. 2016. <a href="https://arxiv.org/pdf/1603.01354.pdf" target="_blank">*End-to-end
-sequence labeling via bi-directional LSTM-CNNsCRF*</a>. In ACL.
+sequence labeling via bi-directional LSTM-CNN-CRF*</a>. In ACL.
+
+# <span style="color:#2874A6">Further Reading</span>
+
+...
