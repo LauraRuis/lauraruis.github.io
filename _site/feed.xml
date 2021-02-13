@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2021-02-13T15:41:08-05:00</updated><id>/feed.xml</id><title type="html">Ramblings</title><subtitle>Blog about AI stuff.</subtitle><entry><title type="html">Structured Prediction part two - Implementing a linear-chain CRF</title><link href="/2021/01/25/crfpt2.html" rel="alternate" type="text/html" title="Structured Prediction part two - Implementing a linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/2021/01/25/crfpt2</id><content type="html" xml:base="/2021/01/25/crfpt2.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.2.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2021-02-13T16:16:57-05:00</updated><id>/feed.xml</id><title type="html">Ramblings</title><subtitle>Blog about AI stuff.</subtitle><entry><title type="html">Structured Prediction part two - Implementing a linear-chain CRF</title><link href="/2021/01/25/crfpt2.html" rel="alternate" type="text/html" title="Structured Prediction part two - Implementing a linear-chain CRF" /><published>2021-01-25T13:09:17-05:00</published><updated>2021-01-25T13:09:17-05:00</updated><id>/2021/01/25/crfpt2</id><content type="html" xml:base="/2021/01/25/crfpt2.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
 
 &lt;p&gt;In this part of the series of posts on structured prediction with conditional random fields (CRFs) we are going to implement all the ingredients
 that were discussed in &lt;a href=&quot;/2021/01/25/crfpt1.html&quot;&gt;part 1&lt;/a&gt;. Recall that we discussed how to model
@@ -18,7 +18,7 @@ if they’re clear, like batching and broadcasting. Let’s start!&lt;/p&gt;
 
 &lt;p&gt;To learn a model that can annotate examples like the one above with POS tags, we need to extract proper
 features from the input sequence, which we will do with a bidirectional LSTM (motivated below). 
-Then what we’ll implement below is:&lt;/p&gt;
+Then what we’ll implement in this post is:&lt;/p&gt;
 
 &lt;ul&gt;
   &lt;li&gt;
@@ -45,7 +45,7 @@ the NLL of the entire dataset is:&lt;/p&gt;
 &lt;p&gt;Instead of maximizing the log-likelihood of our data, we will minimize the negative log-likelihood, which is equivalent.
 We can use stochastic gradient descent (SGD) with automatic differentiation in &lt;a href=&quot;https://pytorch.org/&quot; target=&quot;_blank&quot;&gt;PyTorch&lt;/a&gt;, meaning we only need the forward-part of the BP algorithm.
 Recall that the forward recursion allows calculation of the partition function (\(Z(\mathbf{x})\)), which we need for the NLL. The backward recursion allows calculating the
-marginals (which are needed for the gradients). PyTorch takes care of the latter calculation for us.&lt;/p&gt;
+marginals (which are needed for the gradients). PyTorch takes care of the latter calculation for us (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;3&lt;/code&gt; PyTorch).&lt;/p&gt;
 
 &lt;p&gt;Let’s start with feature extraction and defining \(\boldsymbol{\theta}_1\), \(\boldsymbol{\theta}_2\), \(f(y_t, \mathbf{x}, t)\), and \(f(y_t, y_{t+1})\).&lt;/p&gt;
 
@@ -156,7 +156,8 @@ that will be discussed in the section ‘sequence batching’ below.&lt;/p&gt;
               &lt;span class=&quot;n&quot;&gt;target_sequence&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
               &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_lengths&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
     &lt;span class=&quot;s&quot;&gt;&quot;&quot;&quot;
-    :param input_sequence: input sequence of size [batch_size, sequence_length]
+    :param input_sequence: input sequence of size 
+            [batch_size, sequence_length, input_vocabulary_size]
     :param target_sequence: POS tags target, [batch_size, sequence_length]
     :param input_mask: padding-mask, [batch_size, sequence_length]
     :param input_lengths: lengths of each example in the batch [batch_size]
@@ -182,7 +183,7 @@ that will be discussed in the section ‘sequence batching’ below.&lt;/p&gt;
 &lt;h2 id=&quot;implementing-a-linear-chain-crf&quot;&gt;&lt;span style=&quot;color:#C0392B&quot;&gt;Implementing a Linear-Chain CRF&lt;/span&gt;&lt;/h2&gt;
 
 &lt;p&gt;We want \(f(y_t, y_{t+1})\) to represent the likelihood of some tag \(y_{t+1}\) following \(y_t\) in the sequence, which
-can be interpreted as transition likelihood from one tag to another. The parameters \(\boldsymbol{\theta}_2\) are shared
+can be interpreted as transition likelihood from one tag to another. We assumed the parameters \(\boldsymbol{\theta}_2\) are shared
 over time (meaning they are the same for each \(t \in \{1, \dots, m-1\}\)), and thus we can simply define a matrix of transition ‘probabilities’ from each tag to another tag.
 We define \(\boldsymbol{\theta}_2f(y_t, y_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\), meaning the \(y_t\)-th row (recall that \(y_t\) is an index that represents a tag) and \(y_{t+1}\)-th column of a matrix \(\mathbf{T}\).
 This matrix \(\mathbf{T}\) will be of size \((|S| + 2) \times (|S| + 2)\). The 2 extra tags are the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;ROOT&amp;gt;&lt;/code&gt; and the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&amp;lt;EOS&amp;gt;&lt;/code&gt; tag.
@@ -196,7 +197,7 @@ first tag of a sequence, and the probability of a tag being the last tag. For th
     &lt;p&gt;The forward-pass of belief propagation (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF.forward_belief_propagation(...)&lt;/code&gt;), calculating the partition function (i.e., the denominator of \(p(\mathbf{y} \mid \mathbf{x})\)).&lt;/p&gt;
   &lt;/li&gt;
   &lt;li&gt;
-    &lt;p&gt;Calculating the nominator of \(p(\mathbf{y} \mid \mathbf{x})\) (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF.score_sentence(...)&lt;/code&gt;)&lt;/p&gt;
+    &lt;p&gt;Calculating the log-nominator of \(p(\mathbf{y} \mid \mathbf{x})\) (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF.score_sentence(...)&lt;/code&gt;)&lt;/p&gt;
   &lt;/li&gt;
   &lt;li&gt;
     &lt;p&gt;Decoding to get the target sequence prediction (&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ChainCRF.viterbi_decode(...)&lt;/code&gt;)&lt;/p&gt;
@@ -268,11 +269,11 @@ We do the same for any transition from &lt;code class=&quot;language-plaintext h
         &lt;span class=&quot;n&quot;&gt;partition_function&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;forward_belief_propagation&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
                                     &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
                                     &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-        &lt;span class=&quot;n&quot;&gt;nominator&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;score_sentence&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;log_nominator&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;score_sentence&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
                                     &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
                                     &lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
                                     &lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_mask&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;partition_function&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;nominator&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;partition_function&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;log_nominator&lt;/span&gt;
 
       &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;forward&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
                   &lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;torch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Tensor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
@@ -289,6 +290,8 @@ We do the same for any transition from &lt;code class=&quot;language-plaintext h
                 [batch_size, sequence_length]
         :param input_mask: the binary mask determining which of 
                 the input entries are padding [batch_size, sequence_length]
+        :param input_lengths: the sequence length of each example in the 
+                batch of size [batch_size]
         &quot;&quot;&quot;&lt;/span&gt;
         &lt;span class=&quot;n&quot;&gt;loss&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;negative_log_likelihood&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;input_features&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
                                             &lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;target_tags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
@@ -438,8 +441,10 @@ every part of the equations with the corresponding variable name their values ar
 \end{aligned}\]
 
 &lt;p&gt;We discussed above that \(\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1) = \mathbf{H}_{t+1,y_{t+1}}\) is the t+1-th row and \(y_{t+1}\)-th column of the projected output of our encoder. These values are collected in a vector called &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;unary_features&lt;/code&gt; for all \(y^{\prime}_{t+1}\) (meaning the vector has size \(|S|\)). In the above
- recursion, these values are the same for all \(y_t^{\prime}\) in the sum. Then \(\boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\)
-is the \(y_t\)-th row and \(y_{t+1}\)-th column of the matrix of transition probabilities. The vector &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;transition_scores&lt;/code&gt; in the code holds the probabilities from all \(y_t\)’s to a particular \(y_{t+1}\).&lt;/p&gt;
+ recursion, these values are the same for all \(y_t^{\prime}\) in the sum (meaning we can use broadcasting in the code!). Then \(\boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\)
+is the \(y_t\)-th row and \(y_{t+1}\)-th column of the matrix of transition probabilities. The vector &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;transition_scores&lt;/code&gt; in the code holds the probabilities from all \(y_t\)’s to a particular \(y_{t+1}\). These are
+the same for each example in the batch, which again asks for broadcasting in the implementation (but I’ll explain that in detail
+below the code).&lt;/p&gt;
 
 &lt;p&gt;Now let’s take a look at the code that implements all this. Below the code we’ll go through some clarifications.&lt;/p&gt;
 
@@ -493,7 +498,7 @@ is the \(y_t\)-th row and \(y_{t+1}\)-th column of the matrix of transition prob
 
       &lt;span class=&quot;c1&quot;&gt;# Calculate next tag probabilities.
 &lt;/span&gt;      &lt;span class=&quot;n&quot;&gt;forward_alpha_e&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;forward_alpha&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;unsqueeze&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-      &lt;span class=&quot;n&quot;&gt;next_forward_alpha&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;forward_alpha_e&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;unary_features&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;transition_scores&lt;/span&gt;
+      &lt;span class=&quot;n&quot;&gt;next_forward_alpha&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;unary_features&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;transition_scores&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;forward_alpha_e&lt;/span&gt;
 
       &lt;span class=&quot;c1&quot;&gt;# Calculate next forward alpha by taking logsumexp over current tag axis, 
 &lt;/span&gt;      &lt;span class=&quot;c1&quot;&gt;# mask all instances that ended and keep the old forward alphas
@@ -513,7 +518,7 @@ is the \(y_t\)-th row and \(y_{t+1}\)-th column of the matrix of transition prob
 &lt;p&gt;The code recurses over the time dimension, from \(1\) to \(m\), and calculates the alphas in log-space.
 The first important line is the following:&lt;/p&gt;
 
-&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;next_forward_alpha = forward_alpha_e + unary_features + transition_scores&lt;/code&gt;&lt;/p&gt;
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;next_forward_alpha = unary_features + transition_scores + forward_alpha_e&lt;/code&gt;&lt;/p&gt;
 
 &lt;p&gt;This line basically calculates the recursion above without the &lt;em&gt;logsumexp&lt;/em&gt;-ing:&lt;/p&gt;
 
@@ -528,6 +533,9 @@ The first important line is the following:&lt;/p&gt;
 in these two lines of code for a single example in a batch graphically:&lt;/p&gt;
 
 &lt;p&gt;&lt;img src=&quot;/images/broadcast_forward.png&quot; alt=&quot;broadcast_forward&quot; width=&quot;800&quot; class=&quot;center&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;The image above has \(\tilde{\alpha}\) which should be \(\hat{\alpha}\) actually but I can’t for the life of me
+figure out how to do that in Google drawings &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;:D&lt;/code&gt;.&lt;/p&gt;
 
 &lt;p&gt;Note that we add the transition from each tag to the final tag outside of the loop over time, because these are independent
 of time and should happen for every sequence in the batch. Then the whole function returns:&lt;/p&gt;
@@ -548,12 +556,12 @@ or the function &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&
 
 &lt;h1 id=&quot;calculating-the-nominator&quot;&gt;&lt;span style=&quot;color:#C0392B&quot;&gt;Calculating the Nominator&lt;/span&gt;&lt;/h1&gt;
 
-&lt;p&gt;To finish calculating the loss, now that we calculated the partition function, we just need to calculate the (log-)nominator!&lt;/p&gt;
+&lt;p&gt;To finish calculating the loss, we just need to calculate the (log-)nominator!&lt;/p&gt;
 
-\[\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\]
+\[\sum_{t=1}^m \underbrace{\boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}^{(i)}, t)}_{\text{unary_features}} + \sum_{t=1}^{m-1} \underbrace{\boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})}_{\text{transition_scores}}\]
 
 &lt;p&gt;Which is simply a sum over time of the unary features and the transition probabilities for a given input sentence \(\mathbf{x}^{(i)}\)
-and target tag sequence \(\mathbf{y}^{(i)}\). In the implementation we loop over all the sequences in the batch,
+and target tag sequence \(\mathbf{y}^{(i)}\). In the implementation we loop over all the sequences in the batch in parallel,
 get the current tag for each example in the batch from the ground-truth sequence &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;target_tags&lt;/code&gt;,
 and calculate the current unary scores and transition scores from the current time to the next.&lt;/p&gt;
 
@@ -565,7 +573,8 @@ and calculate the current unary scores and transition scores from the current ti
         input features and sequences of target tags.
         :param input_features: the features for each input sequence
             [batch_size, sequence_length, num_tags] 
-        :param target_tags:
+        :param target_tags: tensor with the ground-truth target tags
+            of size [batch_size, sequence_length]
         :param input_mask: the binary mask determining which of the input 
             entries are padding [batch_size, sequence_length]
 
@@ -1024,7 +1033,7 @@ We will choose the &lt;a href=&quot;http://universaldependencies.org/&quot; targ
 
 &lt;p&gt;Natalia Silveira and Timothy Dozat and Marie-Catherine de Marneffe and Samuel Bowman and
     Miriam Connor and John Bauer and Christopher D. Manning (2014).
-    &lt;a href=&quot;https://www.aclweb.org/anthology/L14-1067/&quot; target=&quot;_blank&quot;&gt;&lt;em&gt;A Gold Standard Dependency Corpus for English&lt;/em&gt;&lt;/a&gt;&lt;/p&gt;</content><author><name></name></author><summary type="html"></summary></entry><entry><title type="html">Structured Prediction part one - Linear-chain CRF</title><link href="/2021/01/25/crfpt1.html" rel="alternate" type="text/html" title="Structured Prediction part one - Linear-chain CRF" /><published>2021-01-25T00:00:00-05:00</published><updated>2021-01-25T00:00:00-05:00</updated><id>/2021/01/25/crfpt1</id><content type="html" xml:base="/2021/01/25/crfpt1.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+    &lt;a href=&quot;https://www.aclweb.org/anthology/L14-1067/&quot; target=&quot;_blank&quot;&gt;&lt;em&gt;A Gold Standard Dependency Corpus for English&lt;/em&gt;&lt;/a&gt;&lt;/p&gt;</content><author><name></name></author><summary type="html"></summary></entry><entry><title type="html">Structured Prediction part one - Deriving a Linear-chain CRF</title><link href="/2021/01/25/crfpt1.html" rel="alternate" type="text/html" title="Structured Prediction part one - Deriving a Linear-chain CRF" /><published>2021-01-25T00:00:00-05:00</published><updated>2021-01-25T00:00:00-05:00</updated><id>/2021/01/25/crfpt1</id><content type="html" xml:base="/2021/01/25/crfpt1.html">&lt;script src=&quot;https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
 
 &lt;p&gt;You’re looking at part one of a series of posts about &lt;em&gt;structured prediction with conditional random fields&lt;/em&gt;. In this post, we’ll talk about linear-chain
 CRFs applied to part-of-speech (POS) tagging. In POS tagging, we label all words with a particular class, like verb or noun.

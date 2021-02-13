@@ -24,7 +24,7 @@ if they're clear, like batching and broadcasting. Let's start!
 
 To learn a model that can annotate examples like the one above with POS tags, we need to extract proper
 features from the input sequence, which we will do with a bidirectional LSTM (motivated below). 
-Then what we'll implement below is:
+Then what we'll implement in this post is:
 
 - An `Encoder` model that holds our feature extractor (the bidirectional LSTM).
 
@@ -48,7 +48,7 @@ $$
 Instead of maximizing the log-likelihood of our data, we will minimize the negative log-likelihood, which is equivalent.
 We can use stochastic gradient descent (SGD) with automatic differentiation in <a href="https://pytorch.org/" target="_blank">PyTorch</a>, meaning we only need the forward-part of the BP algorithm.
 Recall that the forward recursion allows calculation of the partition function ($$Z(\mathbf{x})$$), which we need for the NLL. The backward recursion allows calculating the
-marginals (which are needed for the gradients). PyTorch takes care of the latter calculation for us.
+marginals (which are needed for the gradients). PyTorch takes care of the latter calculation for us (`<3` PyTorch).
 
 Let's start with feature extraction and defining $$\boldsymbol{\theta}_1$$, $$\boldsymbol{\theta}_2$$, $$f(y_t, \mathbf{x}, t)$$, and $$f(y_t, y_{t+1})$$.
 
@@ -164,7 +164,8 @@ class Tagger(nn.Module):
               target_sequence: torch.Tensor, 
               input_mask: torch.Tensor, input_lengths: torch.Tensor):
     """
-    :param input_sequence: input sequence of size [batch_size, sequence_length]
+    :param input_sequence: input sequence of size 
+            [batch_size, sequence_length, input_vocabulary_size]
     :param target_sequence: POS tags target, [batch_size, sequence_length]
     :param input_mask: padding-mask, [batch_size, sequence_length]
     :param input_lengths: lengths of each example in the batch [batch_size]
@@ -191,7 +192,7 @@ OK, now we can finally get to the definition of $$\boldsymbol{\theta}_2$$ and $$
 ## <span style="color:#C0392B">Implementing a Linear-Chain CRF</span>
 
 We want $$f(y_t, y_{t+1})$$ to represent the likelihood of some tag $$y_{t+1}$$ following $$y_t$$ in the sequence, which
-can be interpreted as transition likelihood from one tag to another. The parameters $$\boldsymbol{\theta}_2$$ are shared
+can be interpreted as transition likelihood from one tag to another. We assumed the parameters $$\boldsymbol{\theta}_2$$ are shared
 over time (meaning they are the same for each $$t \in \{1, \dots, m-1\}$$), and thus we can simply define a matrix of transition 'probabilities' from each tag to another tag.
 We define $$\boldsymbol{\theta}_2f(y_t, y_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}$$, meaning the $$y_t$$-th row (recall that $$y_t$$ is an index that represents a tag) and $$y_{t+1}$$-th column of a matrix $$\mathbf{T}$$.
 This matrix $$\mathbf{T}$$ will be of size $$(|S| + 2) \times (|S| + 2)$$. The 2 extra tags are the `<ROOT>` and the `<EOS>` tag.
@@ -202,7 +203,7 @@ In this part we will implement:
 
 - The forward-pass of belief propagation (`ChainCRF.forward_belief_propagation(...)`), calculating the partition function (i.e., the denominator of $$p(\mathbf{y} \mid \mathbf{x})$$).
 
-- Calculating the nominator of $$p(\mathbf{y} \mid \mathbf{x})$$ (`ChainCRF.score_sentence(...)`)
+- Calculating the log-nominator of $$p(\mathbf{y} \mid \mathbf{x})$$ (`ChainCRF.score_sentence(...)`)
 
 - Decoding to get the target sequence prediction (`ChainCRF.viterbi_decode(...)`)
 
@@ -271,11 +272,11 @@ We do the same for any transition from `<EOS>` to any other tag. The class below
         partition_function = self.forward_belief_propagation(
                                     input_features=input_features, 
                                     input_mask=input_mask)
-        nominator = self.score_sentence(
+        log_nominator = self.score_sentence(
                                     input_features=input_features,
                                     target_tags=target_tags, 
                                     input_mask=input_mask)
-        return partition_function - nominator
+        return partition_function - log_nominator
 
       def forward(self, input_features: torch.Tensor, 
                   target_tags: torch.Tensor, 
@@ -292,6 +293,8 @@ We do the same for any transition from `<EOS>` to any other tag. The class below
                 [batch_size, sequence_length]
         :param input_mask: the binary mask determining which of 
                 the input entries are padding [batch_size, sequence_length]
+        :param input_lengths: the sequence length of each example in the 
+                batch of size [batch_size]
         """
         loss = self.negative_log_likelihood(input_features=input_features, 
                                             target_tags=target_tags,
@@ -461,8 +464,10 @@ $$
 $$
 
 We discussed above that $$\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1) = \mathbf{H}_{t+1,y_{t+1}}$$ is the t+1-th row and $$y_{t+1}$$-th column of the projected output of our encoder. These values are collected in a vector called `unary_features` for all $$y^{\prime}_{t+1}$$ (meaning the vector has size $$|S|$$). In the above
- recursion, these values are the same for all $$y_t^{\prime}$$ in the sum. Then $$\boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}$$
-is the $$y_t$$-th row and $$y_{t+1}$$-th column of the matrix of transition probabilities. The vector `transition_scores` in the code holds the probabilities from all $$y_t$$'s to a particular $$y_{t+1}$$. 
+ recursion, these values are the same for all $$y_t^{\prime}$$ in the sum (meaning we can use broadcasting in the code!). Then $$\boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}$$
+is the $$y_t$$-th row and $$y_{t+1}$$-th column of the matrix of transition probabilities. The vector `transition_scores` in the code holds the probabilities from all $$y_t$$'s to a particular $$y_{t+1}$$. These are
+the same for each example in the batch, which again asks for broadcasting in the implementation (but I'll explain that in detail
+below the code).
 
 Now let's take a look at the code that implements all this. Below the code we'll go through some clarifications.
 {% highlight python %}
@@ -516,7 +521,7 @@ def forward_belief_propagation(self, input_features: torch.Tensor,
 
       # Calculate next tag probabilities.
       forward_alpha_e = forward_alpha.unsqueeze(2)
-      next_forward_alpha = forward_alpha_e + unary_features + transition_scores
+      next_forward_alpha = unary_features + transition_scores + forward_alpha_e
 
       # Calculate next forward alpha by taking logsumexp over current tag axis, 
       # mask all instances that ended and keep the old forward alphas
@@ -537,7 +542,7 @@ def forward_belief_propagation(self, input_features: torch.Tensor,
 The code recurses over the time dimension, from $$1$$ to $$m$$, and calculates the alphas in log-space.
 The first important line is the following:
 
-`next_forward_alpha = forward_alpha_e + unary_features + transition_scores`
+`next_forward_alpha = unary_features + transition_scores + forward_alpha_e`
 
 This line basically calculates the recursion above without the *logsumexp*-ing:
 
@@ -552,6 +557,9 @@ We get our subsequent alpha recursion variables for all $$y^{\prime}_{t+1}$$. Th
 in these two lines of code for a single example in a batch graphically:
 
 <img src="/images/broadcast_forward.png" alt="broadcast_forward" width="800" class="center"/>
+
+The image above has $$\tilde{\alpha}$$ which should be $$\hat{\alpha}$$ actually but I can't for the life of me
+figure out how to do that in Google drawings `:D`.
 
 Note that we add the transition from each tag to the final tag outside of the loop over time, because these are independent
 of time and should happen for every sequence in the batch. Then the whole function returns:
@@ -574,12 +582,12 @@ or the function `ChainCRF.score_sentence(...)`.
 
 # <span style="color:#C0392B">Calculating the Nominator</span>
 
-To finish calculating the loss, now that we calculated the partition function, we just need to calculate the (log-)nominator!
+To finish calculating the loss, we just need to calculate the (log-)nominator!
 
-$$\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})$$
+$$\sum_{t=1}^m \underbrace{\boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}^{(i)}, t)}_{\text{unary_features}} + \sum_{t=1}^{m-1} \underbrace{\boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})}_{\text{transition_scores}}$$
 
 Which is simply a sum over time of the unary features and the transition probabilities for a given input sentence $$\mathbf{x}^{(i)}$$
-and target tag sequence $$\mathbf{y}^{(i)}$$. In the implementation we loop over all the sequences in the batch,
+and target tag sequence $$\mathbf{y}^{(i)}$$. In the implementation we loop over all the sequences in the batch in parallel,
 get the current tag for each example in the batch from the ground-truth sequence `target_tags`,
 and calculate the current unary scores and transition scores from the current time to the next.
 
@@ -593,7 +601,8 @@ def score_sentence(self, input_features: torch.Tensor,
         input features and sequences of target tags.
         :param input_features: the features for each input sequence
             [batch_size, sequence_length, num_tags] 
-        :param target_tags:
+        :param target_tags: tensor with the ground-truth target tags
+            of size [batch_size, sequence_length]
         :param input_mask: the binary mask determining which of the input 
             entries are padding [batch_size, sequence_length]
 
