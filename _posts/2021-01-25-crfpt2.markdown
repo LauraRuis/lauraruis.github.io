@@ -559,7 +559,7 @@ in these two lines of code for a single example in a batch graphically:
 <img src="/images/broadcast_forward.png" alt="broadcast_forward" width="800" class="center"/>
 
 The image above has $$\tilde{\alpha}$$ which should be $$\hat{\alpha}$$ actually but I can't for the life of me
-figure out how to do that in Google drawings `:D`.
+figure out how to do that in Google drawings `>:(`.
 
 Note that we add the transition from each tag to the final tag outside of the loop over time, because these are independent
 of time and should happen for every sequence in the batch. Then the whole function returns:
