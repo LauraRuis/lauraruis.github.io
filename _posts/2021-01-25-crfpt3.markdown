@@ -1,0 +1,30 @@
+---
+layout: post
+title:  "Structured Prediction part three - Training a linear-chain CRF"
+date:   2021-01-25 13:09:17 -0500
+usemathjax: true
+---
+<script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+
+![annotated_example](/images/opener_gif/opener.gif)
+
+In this final part of the series on structured prediction with linear-chain CRFs we will use our implementation from [part two]({% post_url 2021-01-25-crfpt2 %})
+to train a model on real data.
+To learn a model that can annotate examples like the one above with POS tags, we need a dataset with examples consisting of input sentences annotated with POS tags.
+We will choose the <a href="http://universaldependencies.org/" target="_blank">Universal Dependencies</a> dataset (<a href="https://www.aclweb.org/anthology/L14-1067/" target="_blank">Silveira et al., 2014</a>).
+
+Then all the things we need to implement are:
+
+- A `Vocabulary` to convert from strings to numerical values for computational models.
+
+- A `TaggingDataset` to convert all our data to `Tensors` that can be processed by <a href="https://pytorch.org/" target="_blank">PyTorch</a>.
+
+- A `train()` loop to train our CRF and feature-extractor end-to-end on data.
+
+- A `test()` loop to test a trained model on new data.
+
+# <span style="color:#2874A6">Sources</span>
+
+Natalia Silveira and Timothy Dozat and Marie-Catherine de Marneffe and Samuel Bowman and
+    Miriam Connor and John Bauer and Christopher D. Manning (2014).
+    <a href="https://www.aclweb.org/anthology/L14-1067/" target="_blank">*A Gold Standard Dependency Corpus for English*</a>

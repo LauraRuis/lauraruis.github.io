@@ -1,20 +1,20 @@
 ---
 layout: post
-title:  "Structured Prediction Pt. 1 - Linear-chain CRF"
+title:  "Structured Prediction part one - Linear-chain CRF"
 usemathjax: true
 ---
 <script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
 
-You're looking at part 1 of a series of posts about *structured prediction with conditional random fields*. In this post, we'll talk about linear-chain
+You're looking at part one of a series of posts about *structured prediction with conditional random fields*. In this post, we'll talk about linear-chain
 CRFs applied to part-of-speech (POS) tagging. In POS tagging, we label all words with a particular class, like verb or noun.
   This can be useful for things like word-sense disambiguation, dependency parsing, machine translation, and other
   NLP applications. In the following, we will cover the necessary background to understand the motivation behind using a CRF,
 talking about things like *discriminative and generative modeling*, *probabilistic graphical models*, training a linear-chain CRF
-with efficient inference methods using *dynamic programming* like *belief propagation* (AKA the forward-backward algorithm), and decoding with *Viterbi*. In part 2, 
+with efficient inference methods using *dynamic programming* like *belief propagation* (AKA the forward-backward algorithm), and decoding with *Viterbi*. In part two, 
 we will implement all these ingredients in the popular deep learning library <a href="https://pytorch.org/" target="_blank">PyTorch</a>.
-If you want to skip the background and start implementing, go to [part 2]({% post_url 2021-01-25-crfpt2 %}), where we'll put a linear-chain CRF on top of a bidirectional
-LSTM and train it all end-to-end on a POS tagging dataset.
-Part 3 and 4 of this series will go into using more general (non-linear) CRFs for dependency parsing. OK! Let's start.
+If you want to skip the background and start implementing, go to [part two]({% post_url 2021-01-25-crfpt2 %}), where we'll put a linear-chain CRF on top of a bidirectional
+LSTM and in [part three]({% post_url 2021-01-25-crfpt3 %}) train it all end-to-end on a POS tagging dataset.
+OK! Let's start.
 
 Consider the following sentence that is partly annotated with POS tags:
 
@@ -109,7 +109,7 @@ Z(\mathbf{x}) &= \sum_{\mathbf{y}^{\prime}}\exp\left(\sum_{t=1}^m \boldsymbol{\t
  
 Intuitively, the first sum in the exponent above should represent the probabilities that a particular $$y_t$$ is the right POS tag at time $$t$$, and the
 second sum should represent the probabilities that each $$y_{t+1}$$ follows a particular $$y_{t}$$. Luckily, 
-we don't need to hand-engineer the feature functions to reflect these intuitions anymore and can hit it with the DL hammer `:)` (which we will cover in [part 2]({% post_url 2021-01-25-crfpt2 %}) of this series).
+we don't need to hand-engineer the feature functions to reflect these intuitions anymore and can hit it with the DL hammer `:)` (which we will cover in [part two]({% post_url 2021-01-25-crfpt2 %}) of this series).
 The value $$Z(\mathbf{x})$$ is
 just the partition function ensuring that this formula is a properly defined probability distribution that sums to 1. Again, here the sum over all
 possible sequences of $$\mathbf{y}$$ appears, and naive methods of computing this sum are intractable, which is why we will use belief propagation! 
@@ -327,7 +327,7 @@ which is simply a probabilistic graphical model with a particular choice of para
 maximizing the likelihood. This procedure asked for an efficient way of calculating the partition function and the marginals of the CRF model, which we did with
 the dynamic programming algorithm belief propagation. Finally we showed how to find the maximizing sequence under the current model with the Viterbi algorithm.
 Now we are ready to implement everything in PyTorch, and use a deep neural network as a feature extractor. We can simply put the CRF on top of a neural network of choice,
-like LSTM's, and train everything end-to-end with stochastic gradient ascent on the likelihood! All part of [part 2]({% post_url 2021-01-25-crfpt2 %}) of this series.
+like LSTM's, and train everything end-to-end with stochastic gradient ascent on the likelihood! All part of [part two]({% post_url 2021-01-25-crfpt2 %}) and [part three]({% post_url 2021-01-25-crfpt3 %}) of this series.
 
 ## <span style="color:#2874A6">Sources</span>
 The following sources I heavily used for this post:

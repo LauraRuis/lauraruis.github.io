@@ -3,9 +3,9 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.7.1 -->
-<title>Structured Prediction Pt. 2 - Implementing a linear-chain CRF | Ramblings</title>
+<title>Structured Prediction part two - Implementing a linear-chain CRF | Ramblings</title>
 <meta name="generator" content="Jekyll v4.2.0" />
-<meta property="og:title" content="Structured Prediction Pt. 2 - Implementing a linear-chain CRF" />
+<meta property="og:title" content="Structured Prediction part two - Implementing a linear-chain CRF" />
 <meta property="og:locale" content="en_US" />
 <meta name="description" content="Blog about AI stuff." />
 <meta property="og:description" content="Blog about AI stuff." />
@@ -15,9 +15,9 @@
 <meta property="og:type" content="article" />
 <meta property="article:published_time" content="2021-01-25T13:09:17-05:00" />
 <meta name="twitter:card" content="summary" />
-<meta property="twitter:title" content="Structured Prediction Pt. 2 - Implementing a linear-chain CRF" />
+<meta property="twitter:title" content="Structured Prediction part two - Implementing a linear-chain CRF" />
 <script type="application/ld+json">
-{"headline":"Structured Prediction Pt. 2 - Implementing a linear-chain CRF","dateModified":"2021-01-25T13:09:17-05:00","datePublished":"2021-01-25T13:09:17-05:00","url":"/2021/01/25/crfpt2.html","mainEntityOfPage":{"@type":"WebPage","@id":"/2021/01/25/crfpt2.html"},"description":"Blog about AI stuff.","@type":"BlogPosting","@context":"https://schema.org"}</script>
+{"headline":"Structured Prediction part two - Implementing a linear-chain CRF","dateModified":"2021-01-25T13:09:17-05:00","datePublished":"2021-01-25T13:09:17-05:00","url":"/2021/01/25/crfpt2.html","mainEntityOfPage":{"@type":"WebPage","@id":"/2021/01/25/crfpt2.html"},"description":"Blog about AI stuff.","@type":"BlogPosting","@context":"https://schema.org"}</script>
 <!-- End Jekyll SEO tag -->
 <link rel="stylesheet" href="/assets/main.css"><link type="application/atom+xml" rel="alternate" href="/feed.xml" title="Ramblings" /></head>
 <body><header class="site-header" role="banner">
@@ -32,7 +32,7 @@
           </span>
         </label>
 
-        <div class="trigger"><a class="page-link" href="/about/">About</a></div>
+        <div class="trigger"></div>
       </nav></div>
 </header>
 <main class="page-content" aria-label="Content">
@@ -40,7 +40,7 @@
         <article class="post h-entry" itemscope itemtype="http://schema.org/BlogPosting">
 
   <header class="post-header">
-    <h1 class="post-title p-name" itemprop="name headline">Structured Prediction Pt. 2 - Implementing a linear-chain CRF</h1>
+    <h1 class="post-title p-name" itemprop="name headline">Structured Prediction part two - Implementing a linear-chain CRF</h1>
     <p class="post-meta">
       <time class="dt-published" datetime="2021-01-25T13:09:17-05:00" itemprop="datePublished">Jan 25, 2021
       </time></p>
@@ -61,46 +61,24 @@ and the implementation has lots of parts that come from
 so if it’s simply a good implementation you’re looking for, take a look at that one. If you’d like to understand how it works from scratch, keep on reading. Bear with me here,
 I discuss everything rather in detail and try not to skip over anything, from batching and broadcasting to changing the forward-recursion of BP for a cleaner implementation and Viterbi,
 so if you rather want a succint blogpost you might want to choose one of the great other options that are also out there! Alternatively, there are some sections you can skip
-if they’re clear, like batching and broadcasting.</p>
+if they’re clear, like batching and broadcasting. Let’s start!</p>
 
 <p><img src="/images/opener_gif/opener.gif" alt="annotated_example" /></p>
 
-<p>To learn a model that can annotate examples like the one above with POS tags, we need two things:</p>
-
-<ol>
-  <li>
-    <p>A dataset with examples consisting of input sentences annotated with POS tags.
-We will choose the <a href="http://universaldependencies.org/" target="_blank">Universal Dependencies</a> dataset (<a href="https://www.aclweb.org/anthology/L14-1067/" target="_blank">Silveira et al., 2014</a>).</p>
-  </li>
-  <li>
-    <p>A feature extractor to extract features from our input data. For this we will choose a bidirectional LSTM, which we will motivate below.</p>
-  </li>
-</ol>
-
-<p>Then all the things we need to implement are:</p>
+<p>To learn a model that can annotate examples like the one above with POS tags, we need to extract proper
+features from the input sequence, which we will do with a bidirectional LSTM (motivated below). 
+Then what we’ll implement below is:</p>
 
 <ul>
   <li>
-    <p>A <code class="language-plaintext highlighter-rouge">Vocabulary</code> to convert from strings to numerical values that are machine readable</p>
+    <p>An <code class="language-plaintext highlighter-rouge">Encoder</code> model that holds our feature extractor (the bidirectional LSTM).</p>
   </li>
   <li>
-    <p>A <code class="language-plaintext highlighter-rouge">TaggingDataset</code> to convert all our data to <code class="language-plaintext highlighter-rouge">Tensors</code> that can be processed by <a href="https://pytorch.org/" target="_blank">PyTorch</a></p>
-  </li>
-  <li>
-    <p>An <code class="language-plaintext highlighter-rouge">Encoder</code> model that is our feature extractor (the bidirectional LSTM).</p>
-  </li>
-  <li>
-    <p>A <code class="language-plaintext highlighter-rouge">ChainCRF</code> model that implements all the CRF methods, like belief propagation (BF) and Viterbi decoding.</p>
-  </li>
-  <li>
-    <p>A <code class="language-plaintext highlighter-rouge">train()</code> loop to train our CRF and feature-extractor end-to-end on data.</p>
-  </li>
-  <li>
-    <p>A <code class="language-plaintext highlighter-rouge">test()</code> loop to test a trained model on new data.</p>
+    <p>A <code class="language-plaintext highlighter-rouge">ChainCRF</code> model that implements all the CRF methods, like belief propagation (BP) and Viterbi decoding.</p>
   </li>
 </ul>
 
-<p>The final model we get by walking through this post is depicted in the image below.</p>
+<p>The end-to-end model we get by walking through this post is depicted in the image below.</p>
 
 <p><img src="/images/bilstmcrf.png" alt="bilstmcrf" width="600" class="center" /></p>
 
@@ -122,7 +100,7 @@ marginals (which are needed for the gradients). PyTorch takes care of the latter
 
 <h2 id="preliminaries"><span style="color:#C0392B">Preliminaries</span></h2>
 
-<p>Ok I lied, let’s start with some preliminaries, if you want to run the code used in this post yourself, make sure to install <strong>PyTorch &gt;= 1.7.0</strong>,
+<p>If you want to run the code used in this post yourself, make sure to install <strong>PyTorch &gt;= 1.7.0</strong>,
 <strong>Python 3.6</strong>, and <strong>TorchNLP &gt;= 0.5.0</strong>.</p>
 
 <h2 id="feature-extraction"><span style="color:#C0392B">Feature Extraction</span></h2>
@@ -193,7 +171,7 @@ the CRF (to implement later), and outputs the negative log-likelihood and a pred
 <h2 id="the-tagger"><span style="color:#C0392B">The Tagger</span></h2>
 
 <p>Below we can find the <code class="language-plaintext highlighter-rouge">Tagger</code> module. This is basically the class that implements the model as depicted in the image
-above. The most interesting part is still missing (namely the <code class="language-plaintext highlighter-rouge">ChainCRF</code>-module, but also the <code class="language-plaintext highlighter-rouge">Vocabulary</code>-module), but bear with me, we’ll get to those. The
+above. The most interesting part is still missing (namely the <code class="language-plaintext highlighter-rouge">ChainCRF</code>-module, but also the <code class="language-plaintext highlighter-rouge">Vocabulary</code>-module), but we’ll get to those. The
  forward pass of the <code class="language-plaintext highlighter-rouge">Tagger</code> takes an input sequence, a target sequence, and an input mask (we’ll get to what that is
  when we discuss batching), puts the input sequence through the encoder and the CRF, and outputs the NLL <code class="language-plaintext highlighter-rouge">loss</code>, the <code class="language-plaintext highlighter-rouge">score</code> (
  which is basically the nominator of \(p(\mathbf{y} \mid \mathbf{x})\)), and the <code class="language-plaintext highlighter-rouge">tag_sequence</code> obtained by decoding with viterbi.
@@ -253,9 +231,9 @@ that will be discussed in the section ‘sequence batching’ below.</p>
 <h2 id="implementing-a-linear-chain-crf"><span style="color:#C0392B">Implementing a Linear-Chain CRF</span></h2>
 
 <p>We want \(f(y_t, y_{t+1})\) to represent the likelihood of some tag \(y_{t+1}\) following \(y_t\) in the sequence, which
-can be interpreted as transition ‘probabilities’ from one tag to another. The parameters \(\boldsymbol{\theta}_2\) are shared
+can be interpreted as transition likelihood from one tag to another. The parameters \(\boldsymbol{\theta}_2\) are shared
 over time (meaning they are the same for each \(t \in \{1, \dots, m-1\}\)), and thus we can simply define a matrix of transition ‘probabilities’ from each tag to another tag.
-We define \(\boldsymbol{\theta}_2f(y_t, y_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\), meaning the t-th row and (t+1)-th column of a matrix \(\mathbf{T}\).
+We define \(\boldsymbol{\theta}_2f(y_t, y_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\), meaning the \(y_t\)-th row (recall that \(y_t\) is an index that represents a tag) and \(y_{t+1}\)-th column of a matrix \(\mathbf{T}\).
 This matrix \(\mathbf{T}\) will be of size \((|S| + 2) \times (|S| + 2)\). The 2 extra tags are the <code class="language-plaintext highlighter-rouge">&lt;ROOT&gt;</code> and the <code class="language-plaintext highlighter-rouge">&lt;EOS&gt;</code> tag.
 We need some tag to start of the sequence and to end the sequence, because we want to take into account the probability of a particular tag being the
 first tag of a sequence, and the probability of a tag being the last tag. For the former we will use <code class="language-plaintext highlighter-rouge">&lt;ROOT&gt;</code>, and a for the latter we’ll use <code class="language-plaintext highlighter-rouge">&lt;EOS&gt;</code>.</p>
@@ -444,7 +422,7 @@ See below the code that implements this, adapted from AllenNLP.</p>
     <span class="n">stable_vec</span> <span class="o">=</span> <span class="n">tensor</span> <span class="o">-</span> <span class="n">max_score</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="n">dim</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">max_score</span> <span class="o">+</span> <span class="p">(</span><span class="n">stable_vec</span><span class="p">.</span><span class="n">exp</span><span class="p">().</span><span class="nb">sum</span><span class="p">(</span><span class="n">dim</span><span class="p">)).</span><span class="n">log</span><span class="p">()</span></code></pre></figure>
 
-<p>Broadcasting over dimensions is conceptually the same thing as matrix multiplication of a column vector with a row vector,
+<p>Secondly, we need to talk about broadcasting. Broadcasting over dimensions is conceptually the same thing as matrix multiplication of a column vector with a row vector,
 but then by summing. For example, if we sum <code class="language-plaintext highlighter-rouge">a + b = c</code> where \(a \in \mathbb{R}^{2 \times 1}\) and \(b \in \mathbb{R}^{1 \times 2}\)
 the result will be \(c \in \mathbb{R}^{2 \times 2}\):</p>
 
@@ -476,8 +454,8 @@ equation as defined above, use the following recursion:</p>
 \hat{\alpha}(t, y^{\prime}_{t+1}) &amp;\leftarrow \psi(y^{\prime}_{t+1}, \mathbf{x}, t+1)\sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \hat{\alpha}(t-1, y^{\prime}_t)
 \end{aligned}\]
 
-<p>Why this is equivalent in the end becomes apparent when we look at the full partition function that we’re trying to compute.
-We simply already take the unary features \(\psi(y_2^{\prime}, \mathbf{x}, 2)\) for the next recursion.</p>
+<p>Why this is equivalent becomes apparent when we look at the full partition function we’re trying to compute.
+We simply move the unary features \(\psi(y_2^{\prime}, \mathbf{x}, 2)\) to the previous recursion.</p>
 
 \[\begin{aligned}
 Z(\mathbf{x}) &amp;= \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m)\sum_{y^{\prime}_{m-1}}\psi(y^{\prime}_{m-1}, \mathbf{x}, m-1)\psi(y^{\prime}_{m-1}, y^{\prime}_{m}) \dots \dots \\ 
@@ -493,7 +471,8 @@ Z(\mathbf{x}) &amp;= \sum_{y^{\prime}_m}\psi(y^{\prime}_m, \mathbf{x}, m)\sum_{y
 <p>The new recursion results in much easier code because instead of separately keeping track of when each sequence in the batch
 ends and writing an if-else statement within the loop over time that calculates the above equations for the sequences that
 are ending, we simply already incorporate the unary features of \(y_{t+1}^{\prime}\) in each recursive calculation.
-Then, at the end we only need to sum all new alphas:</p>
+Then, at the end we only need to sum all new alphas, which we can do outside of the loop because the masking
+already takes care of keeping the alphas for the ended sequences the same:</p>
 
 \[Z(\mathbf{x}) = \sum_{y^{\prime}_m}\hat{\alpha}(m-1, y^{\prime}_m)\]
 
@@ -504,10 +483,11 @@ every part of the equations with the corresponding variable name their values ar
 \log\hat{\alpha}(1, y^{\prime}_2) &amp;= \log\psi(y^{\prime}_2, \mathbf{x}, 2) + \log\sum_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
 \log\hat{\alpha}(t, y^{\prime}_{t+1}) &amp;\leftarrow \log\left(\psi(y^{\prime}_{t+1}, \mathbf{x}, t+1)\sum_{y^{\prime}_{t}}\psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\hat{\alpha}(t-1, y^{\prime}_t)\right) \\
 &amp;\leftarrow \log\left(\sum_{y^{\prime}_{t}}\psi(y^{\prime}_{t+1}, \mathbf{x}, t+1) \cdot \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot \exp\log\hat{\alpha}(t-1, y^{\prime}_t)\right) \\
-&amp;\leftarrow \log\left(\sum_{y^{\prime}_{t}}\exp\left(\underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \underbrace{\boldsymbol{\theta}_2(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{\alpha}(t-1, y^{\prime}_t)}_{\text{forward_alpha_e}}\right)\right) \\
+&amp;\leftarrow \log\left(\sum_{y^{\prime}_{t}}\exp\left(\underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \underbrace{\boldsymbol{\theta}_2 f(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{\alpha}(t-1, y^{\prime}_t)}_{\text{forward_alpha_e}}\right)\right) \\
 \end{aligned}\]
 
-<p>We discussed above that \(\boldsymbol{\theta}_1f(y^{\prime}_t, \mathbf{x}, t) = \mathbf{H}_{t,y_t}\) is the t-th row and \(y_t\)-th column of the projected output of our encoder. These values are collected in a vector called <code class="language-plaintext highlighter-rouge">unary_features</code> for all \(y^{\prime}_t\) (meaning the vector has size \(|S|\)). Then \(\boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\)
+<p>We discussed above that \(\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1) = \mathbf{H}_{t+1,y_{t+1}}\) is the t+1-th row and \(y_{t+1}\)-th column of the projected output of our encoder. These values are collected in a vector called <code class="language-plaintext highlighter-rouge">unary_features</code> for all \(y^{\prime}_{t+1}\) (meaning the vector has size \(|S|\)). In the above
+ recursion, these values are the same for all \(y_t^{\prime}\) in the sum. Then \(\boldsymbol{\theta}_2f(y^{\prime}_t, y^{\prime}_{t+1}) = \mathbf{T}_{y_t,y_{t+1}}\)
 is the \(y_t\)-th row and \(y_{t+1}\)-th column of the matrix of transition probabilities. The vector <code class="language-plaintext highlighter-rouge">transition_scores</code> in the code holds the probabilities from all \(y_t\)’s to a particular \(y_{t+1}\).</p>
 
 <p>Now let’s take a look at the code that implements all this. Below the code we’ll go through some clarifications.</p>
@@ -533,6 +513,8 @@ is the \(y_t\)-th row and \(y_{t+1}\)-th column of the matrix of transition prob
 
     <span class="c1"># Initialize the recursion variables with 
 </span>    <span class="c1"># transitions from root token + first unary features.
+</span>    <span class="c1"># Note that we don't have unary features for &lt;ROOT&gt; because
+</span>    <span class="c1"># the probability that we have &lt;ROOT&gt; at the start is just 1.
 </span>    <span class="n">init_alphas</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[</span><span class="bp">self</span><span class="p">.</span><span class="n">root_idx</span><span class="p">,</span> <span class="p">:]</span> <span class="o">+</span> <span class="n">input_features</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>
 
     <span class="c1"># Set recursion variable.
@@ -545,16 +527,17 @@ is the \(y_t\)-th row and \(y_{t+1}\)-th column of the matrix of transition prob
     <span class="c1"># input_mask [sequence_length, batch_size]
 </span>
     <span class="c1"># Loop over sequence and calculate the recursion alphas.
-</span>    <span class="k">for</span> <span class="n">time</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">max_time</span><span class="p">):</span>
+</span>    <span class="k">for</span> <span class="n">time</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">sequence_length</span><span class="p">):</span>
 
       <span class="c1"># Get unary features for this time step.
 </span>      <span class="n">features</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">[</span><span class="n">time</span><span class="p">]</span>
 
       <span class="c1"># Expand the first dimension so we can broadcast it.
+</span>      <span class="c1"># Remember that the unary features are the same for all y_t's in the sum.
 </span>      <span class="n">unary_features</span> <span class="o">=</span> <span class="n">features</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="p">.</span><span class="n">num_tags</span><span class="p">).</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
 
-      <span class="c1"># Expand the batch dimension so we can broadcast the sum
-</span>      <span class="c1"># over it, the transition scores are the same over the batch dimension.
+      <span class="c1"># Expand the batch dimension so we can broadcast.
+</span>      <span class="c1"># The transition scores are the same over the batch dimension.
 </span>      <span class="n">transition_scores</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
 
       <span class="c1"># Calculate next tag probabilities.
@@ -583,9 +566,10 @@ The first important line is the following:</p>
 
 <p>This line basically calculates the recursion above without the <em>logsumexp</em>-ing:</p>
 
-\[\underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \underbrace{\boldsymbol{\theta}_2(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{\alpha}(t-1, y^{\prime}_t)}_{\text{forward_alpha_e}}\]
+\[\underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \underbrace{\boldsymbol{\theta}_2 f(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{\alpha}(t-1, y^{\prime}_t)}_{\text{forward_alpha_e}}\]
 
-<p>But then for all possible POS tags \(y^{\prime}_t\). This is where we use broadcasting. Then if we logsumexp over the first dimension:</p>
+<p>But then for all possible POS tags \(y^{\prime}_t\) and all next tags \(y^{\prime}_{t+1}\). This is where we use broadcasting. The unary features
+ are the same for all \(y^{\prime}_t\), and the forward alphas are the same for all \(y^{\prime}_{t+1}\). Then if we logsumexp over the first dimension:</p>
 
 <p><code class="language-plaintext highlighter-rouge">logsumexp(next_forward_alpha, 1)</code></p>
 
@@ -599,22 +583,52 @@ of time and should happen for every sequence in the batch. Then the whole functi
 
 <p><code class="language-plaintext highlighter-rouge">logsumexp(alphas)</code> which is \(Z(\mathbf{x}) = \sum_{y^{\prime}_m}\hat{\alpha}(m-1, y^{\prime}_m)\).</p>
 
+<p>This is possible for all examples in the batch because we make sure within the loop over time to only update the alphas
+for the sequences that haven’t ended yet. Whenever the value for a particular time-step of the <code class="language-plaintext highlighter-rouge">input_mask</code> is zero,
+the following lines of code make sure that we retain the old alpha for those examples:</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">forward_alpha</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">logsumexp</span><span class="p">(</span><span class="n">next_forward_alpha</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span><span class="p">].</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="o">+</span> <span class="n">forward_alpha</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span><span class="p">]).</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="p">)</span></code></pre></figure>
+
 <p>Yay, that’s calculating the partition function! Now let’s look at calculating the nominator of the CRF,
 or the function <code class="language-plaintext highlighter-rouge">ChainCRF.score_sentence(...)</code>.</p>
 
 <h1 id="calculating-the-nominator"><span style="color:#C0392B">Calculating the Nominator</span></h1>
 
-<p>Meep Morp Beep.</p>
+<p>To finish calculating the loss, now that we calculated the partition function, we just need to calculate the (log-)nominator!</p>
+
+\[\sum_{t=1}^m \boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}^{(i)}, t) + \sum_{t=1}^{m-1} \boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\]
+
+<p>Which is simply a sum over time of the unary features and the transition probabilities for a given input sentence \(\mathbf{x}^{(i)}\)
+and target tag sequence \(\mathbf{y}^{(i)}\). In the implementation we loop over all the sequences in the batch,
+get the current tag for each example in the batch from the ground-truth sequence <code class="language-plaintext highlighter-rouge">target_tags</code>,
+and calculate the current unary scores and transition scores from the current time to the next.</p>
 
 <figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">score_sentence</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_features</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span>
-                        <span class="n">target_tags</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
-                        <span class="n">input_mask</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">:</span>
-        <span class="n">batch_size</span><span class="p">,</span> <span class="n">max_time</span><span class="p">,</span> <span class="n">feature_dimension</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">.</span><span class="n">size</span><span class="p">()</span>
+                   <span class="n">target_tags</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
+                   <span class="n">input_mask</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">:</span>
+        <span class="s">"""
+        Calculates the log-nominator of the CRF for given batch of 
+        input features and sequences of target tags.
+        :param input_features: the features for each input sequence
+            [batch_size, sequence_length, num_tags] 
+        :param target_tags:
+        :param input_mask: the binary mask determining which of the input 
+            entries are padding [batch_size, sequence_length]
 
-        <span class="c1"># Make time major.
-</span>        <span class="n">input_features</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># (time, batch_size, dim)
-</span>        <span class="n">input_mask</span> <span class="o">=</span> <span class="n">input_mask</span><span class="p">.</span><span class="nb">float</span><span class="p">().</span><span class="n">transpose</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># (time, batch_size)
-</span>        <span class="n">target_tags</span> <span class="o">=</span> <span class="n">target_tags</span><span class="p">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># (time, batch_size)
+        Returns: the log-nominator of the CRF [batch_size]
+        """</span>
+        <span class="n">batch_size</span><span class="p">,</span> <span class="n">sequence_length</span><span class="p">,</span> <span class="n">num_tags</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">.</span><span class="n">size</span><span class="p">()</span>
+
+        <span class="c1"># Make time major, for the loop over time.
+</span>        <span class="n">input_features</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  
+        <span class="c1"># input_features: [sequence_length, batch_size, num_tags]
+</span>        <span class="n">input_mask</span> <span class="o">=</span> <span class="n">input_mask</span><span class="p">.</span><span class="nb">float</span><span class="p">().</span><span class="n">transpose</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  
+        <span class="c1"># input_mask: [sequence_length, batch_size]
+</span>        <span class="n">target_tags</span> <span class="o">=</span> <span class="n">target_tags</span><span class="p">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="c1"># target_tags: [sequence_length, batch_size]
 </span>
         <span class="c1"># Get tensor of root tokens and tensor of next tags (first tags).
 </span>        <span class="n">root_tags</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">LongTensor</span><span class="p">([</span><span class="bp">self</span><span class="p">.</span><span class="n">root_idx</span><span class="p">]</span> <span class="o">*</span> <span class="n">batch_size</span><span class="p">)</span>
@@ -627,29 +641,37 @@ or the function <code class="language-plaintext highlighter-rouge">ChainCRF.scor
 
         <span class="c1"># Initialize scores.
 </span>        <span class="n">scores</span> <span class="o">=</span> <span class="n">initial_transition</span>
-
+        <span class="c1"># scores: [batch_size]
+</span>
         <span class="c1"># Loop over time and at each time calculate the score from t to t + 1.
-</span>        <span class="k">for</span> <span class="n">time</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">max_time</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+</span>        <span class="k">for</span> <span class="n">time</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">sequence_length</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
 
-            <span class="c1"># Get emission scores, transition scores and calculate score for current time step.
-</span>            <span class="n">features_t</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">[</span><span class="n">time</span><span class="p">]</span>
-            <span class="n">next_tags</span> <span class="o">=</span> <span class="n">target_tags</span><span class="p">[</span><span class="n">time</span> <span class="o">+</span> <span class="mi">1</span><span class="p">].</span><span class="n">squeeze</span><span class="p">()</span>
-            <span class="n">current_tags</span> <span class="o">=</span> <span class="n">target_tags</span><span class="p">[</span><span class="n">time</span><span class="p">].</span><span class="n">squeeze</span><span class="p">()</span>
-            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">current_tags</span><span class="p">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
-              <span class="n">current_tags</span> <span class="o">=</span> <span class="n">current_tags</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-            <span class="n">emission</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="n">features_t</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">current_tags</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)).</span><span class="n">squeeze</span><span class="p">()</span>
-            <span class="n">transition</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[</span><span class="n">current_tags</span><span class="p">,</span> <span class="n">next_tags</span><span class="p">]</span>
-
+            <span class="c1"># Calculate the score for the current time step.
+</span>            <span class="n">unary_features</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">[</span><span class="n">time</span><span class="p">]</span>
+            <span class="c1"># unary_features: [batch_size, num_tags]
+</span>            <span class="n">next_tags</span> <span class="o">=</span> <span class="n">target_tags</span><span class="p">[</span><span class="n">time</span> <span class="o">+</span> <span class="mi">1</span><span class="p">].</span><span class="n">squeeze</span><span class="p">()</span>
+            <span class="n">current_tags</span> <span class="o">=</span> <span class="n">target_tags</span><span class="p">[</span><span class="n">time</span><span class="p">].</span><span class="n">squeeze</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">unary_features</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="n">unary_features</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> 
+                                          <span class="n">current_tags</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)).</span><span class="n">squeeze</span><span class="p">()</span>
+            <span class="c1"># unary_features: [batch_size]
+</span>            <span class="n">transition_scores</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[</span><span class="n">current_tags</span><span class="p">,</span> <span class="n">next_tags</span><span class="p">]</span>
+            <span class="c1"># transition_scores: [batch_size]
+</span>
             <span class="c1"># Add scores.
-</span>            <span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span> <span class="o">+</span> <span class="n">transition</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">emission</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span><span class="p">]</span>
-
-        <span class="c1"># Add scores for transitioning to stop tag.
+</span>            <span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span> <span class="o">+</span> <span class="n">transition_scores</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> 
+                        <span class="o">+</span> <span class="n">unary_features</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span><span class="p">]</span>
+            <span class="c1"># scores: [batch_size]
+</span>
+        <span class="c1"># Gather the last tag for each example in the batch.
 </span>        <span class="n">last_tag_index</span> <span class="o">=</span> <span class="n">input_mask</span><span class="p">.</span><span class="nb">sum</span><span class="p">(</span><span class="mi">0</span><span class="p">).</span><span class="nb">long</span><span class="p">()</span> <span class="o">-</span> <span class="mi">1</span>
-        <span class="n">last_tags</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="n">target_tags</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">last_tag_index</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">)).</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">last_tags</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="n">target_tags</span><span class="p">,</span> 
+                                 <span class="mi">0</span><span class="p">,</span> 
+                                 <span class="n">last_tag_index</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">)).</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
 
-        <span class="c1"># end_tags
+        <span class="c1"># Get the transition scores from the last tag to the &lt;EOS&gt; tag.
 </span>        <span class="n">end_tags</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">LongTensor</span><span class="p">([</span><span class="bp">self</span><span class="p">.</span><span class="n">end_idx</span><span class="p">]</span> <span class="o">*</span> <span class="n">batch_size</span><span class="p">)</span>
-        <span class="n">end_tags</span> <span class="o">=</span> <span class="n">end_tags</span><span class="p">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span> <span class="k">if</span> <span class="n">torch</span><span class="p">.</span><span class="n">cuda</span><span class="p">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="n">end_tags</span>
+        <span class="k">if</span> <span class="n">torch</span><span class="p">.</span><span class="n">cuda</span><span class="p">.</span><span class="n">is_available</span><span class="p">():</span>
+            <span class="n">end_tags</span> <span class="o">=</span> <span class="n">end_tags</span><span class="p">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
         <span class="n">last_transition</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[</span><span class="n">last_tags</span><span class="p">,</span> <span class="n">end_tags</span><span class="p">]</span>
 
         <span class="c1"># Add the last input if its not masked.
@@ -658,22 +680,370 @@ or the function <code class="language-plaintext highlighter-rouge">ChainCRF.scor
         <span class="n">last_input_score</span> <span class="o">=</span> <span class="n">last_input_score</span><span class="p">.</span><span class="n">squeeze</span><span class="p">()</span>
 
         <span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span> <span class="o">+</span> <span class="n">last_transition</span> <span class="o">+</span> <span class="n">last_input_score</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">scores</span></code></pre></figure>
 
-        <span class="c1"># Sum over sequence length.
-</span>        <span class="k">return</span> <span class="n">scores</span></code></pre></figure>
+<p>In the code above we calculate the unary features for the tags at the current time step with the following line:</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">unary_features</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="n">unary_features</span><span class="p">,</span> 
+                              <span class="mi">1</span><span class="p">,</span>
+                              <span class="n">current_tags</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)).</span><span class="n">squeeze</span><span class="p">()</span></code></pre></figure>
+
+<p>Here, <code class="language-plaintext highlighter-rouge">current_tags</code> is a vector with the index of the tag at time \(t\) in the sequence for each example in the batch,
+and the gather function retrieves this index in the first dimension of the vector <code class="language-plaintext highlighter-rouge">unary_features</code>, which is of size
+<code class="language-plaintext highlighter-rouge">[batch_size, num_tags]</code>, meaning this code gathers \(\boldsymbol{\theta}_1 f(y_t^{(i)}, \mathbf{x}^{(i)}, t)\)
+for all examples in the batch. Then we add these unary features to the transition features for each current tag to
+the next tags at time \(t+1\) (\(\boldsymbol{\theta}_2 f(y_t^{(i)}, y_{t+1}^{(i)})\)), making sure to mask any
+unary features for sequences that have ended, and transition scores for sequences that don’t have a tag anymore at time
+\(t+1\):</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span> <span class="o">+</span> <span class="n">transition_scores</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> 
+                        <span class="o">+</span> <span class="n">unary_features</span> <span class="o">*</span> <span class="n">input_mask</span><span class="p">[</span><span class="n">time</span><span class="p">]</span></code></pre></figure>
+
+<p>Then outside of the loop over time we still need to gather the transition scores for the last tag of each sequence in the batch
+to the <code class="language-plaintext highlighter-rouge">&lt;EOS&gt;</code> token, because we didn’t do this inside the loop. Additionally, we need to add the last unary features for
+the longest sequences in the batch. Finally, we return a log-nominator <code class="language-plaintext highlighter-rouge">score</code> for each sequence in the batch.
+This concludes the calculation of the NLL! So we can start decoding.</p>
+
+<h1 id="viterbi-decoding"><span style="color:#C0392B">Viterbi Decoding</span></h1>
+
+<p>We’ll finally implement decoding with Viterbi. Recall that in structured prediction we ideally want to use an efficient DP algorithm,
+to get rid of the exponential decoding complexity. As mentioned, decoding here is finding the maximum scoring target sequence according to our model. 
+This amounts to solving the following equation:</p>
+
+<p>\(\mathbf{y}^{\star} = arg\max_{\mathbf{y} \in \mathcal{Y}} p(\mathbf{y} \mid \mathbf{x})\).</p>
+
+<p>With Viterbi, the time complexity of doing this is \(m \cdot |S|^2\), instead of \(|S|^m\) if done naively. Viterbi works
+very similarly to BP, but instead of summing we maximize. The Viterbi implementation is by far the most complex one
+of all the CRF methods, especially in the batched version that we’ll use. It’s also the longest function as
+we have to implement both the forward recursion to calculate all the likelihoods of the possible sequences,
+as well as backtracking by following backpointers to obtain the maximum scoring sequence, so we’ll do it in two steps.
+That said, if you went through forward belief propagation and understood that part, this is not much different.</p>
+
+<p>The recursion equations for Viterbi decoding are four equations, one for initializing the recursion variables,
+one for the recursion itself, one for intializing the backpointers and one for recursively finding the backpointer.
+If you want a detailed explanation of how we get to these equations from the \(arg\max\) above, see <a href="/2021/01/25/crfpt1.html">part one</a> of this
+series</p>
+
+\[\begin{aligned}
+v(1, y^{\prime}_2) &amp;= \max_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+v(t, y^{\prime}_{t+1}) &amp;\leftarrow \max_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot v(t-1, y^{\prime}_t) \\
+\overleftarrow{v}(1, y^{\prime}_2) &amp;= arg\max_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\ 
+\overleftarrow{v}(t, y^{\prime}_{t+1}) &amp;\leftarrow arg\max_{y^{\prime}_{t}}\psi(y^{\prime}_t, \mathbf{x}, t) \cdot  \psi(y^{\prime}_t, y^{\prime}_{t+1})\cdot v(t-1, y^{\prime}_t) \\
+\end{aligned}\]
+
+<p>The animation that graphically depict what goes on in Viterbi is the following:</p>
+
+<p><img src="/images/viterbigif/viterbi.gif" alt="viterbi" /></p>
+
+<p>We loop over the sequence, calculating the recursion for each example in the batch and for each tag \(y_t\),
+and at the same time we keep track for each tag which previous tag is the argument that maximizes the sequence up till 
+that tag. This is what the first loop over time in the code below does. Then, we loop backwards over time and follow
+the backpointers to find the maximum scoring sequence. The code below implements all this,
+and below it we’ll go over some more detailed explanations of what’s going, relating the
+code to the equations. I also write much more detailed comments than usually in the code below for
+clarification.</p>
+
+<p>Now even though in this code we do need to have an <code class="language-plaintext highlighter-rouge">if-else</code>-statement within the loop over time to
+keep track of the best last tags (the final column in the above animation). We will still rewrite the recursion
+equations like we did above in forward BP to get rid of the need to separately calculate the final recursive calculation
+for which we don’t have transition probabilities.
+I’m just going to redefine the \(\overleftarrow{v}\) below to avoid notational clutter. Let’s also write everything in logspace while we’re at it,
+but now note that since \(exp(\cdot)\) and \(\log(\cdot)\) are monotonically increasing functions and we only care about
+the maximizing scores and tags, we can just leave them out of the implementation all together. And finally,
+note in the below that we assume \(\psi(y^{\prime}_1, \mathbf{x}, 1)\) of the first tag to be 1
+ because it’s just always the <code class="language-plaintext highlighter-rouge">&lt;ROOT&gt;</code> and \(\psi(y^{\prime}_1, y^{\prime}_{2})\) to be the transition probabilities from the root tag to
+any other tag. This means the initial \(y^{\prime}_1\) that maximizes the equations is simply <code class="language-plaintext highlighter-rouge">&lt;ROOT&gt;</code>.</p>
+
+\[\begin{aligned}
+\hat{v}(1, y^{\prime}_2) &amp;= \log\psi(y^{\prime}_2, \mathbf{x}, 2) + \log\max_{y^{\prime}_1}\psi(y^{\prime}_1, \mathbf{x}, 1) \cdot  \psi(y^{\prime}_1, y^{\prime}_{2}) \\
+&amp;\propto \boldsymbol{\theta}_1f(y^{\prime}_{2}, \mathbf{x}, 2) + \underbrace{\max_{y^{\prime}_1}\boldsymbol{\theta}_2 f(y^{\prime}_1, y^{\prime}_{2})}_{\text{init_vit}} \\
+\hat{v}(t, y^{\prime}_{t+1}) &amp;\leftarrow \boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1) + \log\left(\max_{y^{\prime}_{t}}\exp\left(\boldsymbol{\theta}_2 f(y^{\prime}_t, y^{\prime}_{t+1}) + \hat{v}(t-1, y^{\prime}_t)\right)\right) \\
+&amp;\propto \underbrace{\boldsymbol{\theta}_1f(y^{\prime}_{t+1}, \mathbf{x}, t+1)}_{\text{unary_features}} + \max_{y^{\prime}_{t}}\left(\underbrace{\boldsymbol{\theta}_2 f(y^{\prime}_t, y^{\prime}_{t+1})}_{\text{transition_scores}} + \underbrace{\hat{v}(t-1, y^{\prime}_t)}_{\text{forward_vit}}\right) \\
+\overleftarrow{v}(t, y^{\prime}_{t+1}) &amp;\leftarrow arg\max_{y^{\prime}_{t}}\underbrace{\boldsymbol{\theta}_2 f(y^{\prime}_t, y^{\prime}_{t+1}) + \hat{v}(t-1, y^{\prime}_t)}_{\text{next_tag_vit}} \\
+\end{aligned}\]
+
+<p>I annotated the equations with the variables used in the code again, even though in the equations its all for a single
+example and in the code for a batch of examples.
+We’re going to do this function in two parts (even though they’re actually a single function), where the first part is
+the forward recursion given by the above equations and the second part will be backtracking.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">viterbi_decode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_features</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
+                   <span class="n">input_lengths</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="s">"""
+        Find the maximum scoring tag sequence for each example in the batch.
+        
+        :param input_features: the features for each input sequence
+            [batch_size, sequence_length, num_tags] 
+        :param input_lengths: lengths of each example in the batch [batch_size]
+        
+        Returns: tuple of scores and tag sequences per example in the batch.
+        """</span>           
+        <span class="n">batch_size</span><span class="p">,</span> <span class="n">sequence_length</span><span class="p">,</span> <span class="n">num_tags</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">.</span><span class="n">size</span><span class="p">()</span>
+        
+        <span class="c1"># We don't have input features for the tags &lt;ROOT&gt; and &lt;EOS&gt;, 
+</span>        <span class="c1"># so we artifially add those at the tag-dimension. 
+</span>        <span class="c1"># See in the class constructor above that the last 
+</span>        <span class="c1"># two indices are for the &lt;ROOT&gt; and &lt;EOS&gt; tags.
+</span>        <span class="n">input_features</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">cat</span><span class="p">([</span><span class="n">input_features</span><span class="p">,</span> 
+                                   <span class="n">torch</span><span class="p">.</span><span class="n">zeros</span><span class="p">([</span><span class="n">batch_size</span><span class="p">,</span>
+                                                <span class="n">sequence_length</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> 
+                                                <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span> <span class="o">-</span> <span class="mf">10000.</span><span class="p">],</span>
+                                   <span class="n">dim</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+
+        <span class="c1"># Initialize the viterbi variables in log space
+</span>        <span class="c1"># and set the score of the root tag the highest.
+</span>        <span class="n">init_vit</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">full</span><span class="p">((</span><span class="mi">1</span><span class="p">,</span> <span class="bp">self</span><span class="p">.</span><span class="n">num_tags</span><span class="p">),</span> <span class="o">-</span><span class="mf">10000.</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">init_vit</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="bp">self</span><span class="p">.</span><span class="n">root_idx</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># Initialize tensor to keep track of backpointers.
+</span>        <span class="c1"># This tensor will hold the red arrow backpointers
+</span>        <span class="c1"># like in the animation above the code.
+</span>        <span class="n">backpointers</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">sequence_length</span><span class="p">,</span> <span class="bp">self</span><span class="p">.</span><span class="n">num_tags</span><span class="p">,</span>
+                                   <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">).</span><span class="nb">long</span><span class="p">()</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="c1"># These lists will hold the best last tags and path scores for
+</span>        <span class="c1"># each example in the batch. I.e., when t equals their sequence length.
+</span>        <span class="n">best_last_tags</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">best_path_scores</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># forward_vit at step t holds the viterbi variables for step t - 1
+</span>        <span class="c1"># will be different for each example in batch, but start the same.
+</span>        <span class="n">forward_vit</span> <span class="o">=</span> <span class="n">init_vit</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">).</span><span class="n">repeat</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># A counter counting down from number of examples in batch to 0.
+</span>        <span class="n">num_examples_left</span> <span class="o">=</span> <span class="n">batch_size</span>
+
+        <span class="c1"># Loop over the sequence for the forward recursion.
+</span>        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">sequence_length</span><span class="p">):</span>
+
+            <span class="c1"># Find the sequences that are ending at this t.
+</span>            <span class="n">ending</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">nonzero</span><span class="p">(</span><span class="n">input_lengths</span> <span class="o">==</span> <span class="n">t</span><span class="p">)</span>
+            <span class="n">n_ending</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ending</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">n_ending</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+
+                <span class="c1"># Get the viterbi vars of the ending sequences.
+</span>                <span class="c1"># Important here is that the sequences are ordered descending in 
+</span>                <span class="c1"># length. Meaning the last sequences are ending the first.
+</span>                <span class="n">forward_ending</span> <span class="o">=</span> <span class="n">forward_vit</span><span class="p">[</span>
+                    <span class="p">(</span><span class="n">num_examples_left</span> <span class="o">-</span> <span class="n">n_ending</span><span class="p">):</span><span class="n">num_examples_left</span><span class="p">]</span>
+
+                <span class="c1"># The terminal var giving the best last tag is 
+</span>                <span class="c1"># the viterbi variables + trans. prob. to end token.
+</span>                <span class="n">trans_to_end</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[:,</span> <span class="bp">self</span><span class="p">.</span><span class="n">end_idx</span><span class="p">]</span>
+                <span class="n">terminal_var</span> <span class="o">=</span> <span class="n">forward_ending</span> <span class="o">+</span> <span class="n">trans_to_end</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                
+                <span class="c1"># Get the final best score and tag for these sequences.    
+</span>                <span class="n">path_scores</span><span class="p">,</span> <span class="n">best_tag_idx</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="nb">max</span><span class="p">(</span><span class="n">terminal_var</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+                <span class="c1"># First sequence to end is last sequence in batch, so if 
+</span>                <span class="c1"># we save them like this and reverse the lists
+</span>                <span class="c1"># later on we get the right ordering back.
+</span>                <span class="k">for</span> <span class="n">tag</span><span class="p">,</span> <span class="n">score</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">best_tag_idx</span><span class="p">)),</span> 
+                                      <span class="nb">reversed</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">path_scores</span><span class="p">))):</span>
+                    <span class="n">best_last_tags</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+                    <span class="n">best_path_scores</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">score</span><span class="p">)</span>
+
+                <span class="c1"># Update counter that tracks how many sequences haven't ended.
+</span>                <span class="n">num_examples_left</span> <span class="o">-=</span> <span class="n">n_ending</span>
+
+            <span class="c1"># Calculate scores of next tag
+</span>            <span class="n">forward_vit</span> <span class="o">=</span> <span class="n">forward_vit</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="p">.</span><span class="n">num_tags</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">transition_scores</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">next_tag_vit</span> <span class="o">=</span> <span class="n">forward_vit</span> <span class="o">+</span> <span class="n">transition_scores</span>
+
+            <span class="c1"># Get the best next tags and viterbi vars.
+</span>            <span class="n">viterbivars_t</span><span class="p">,</span> <span class="n">idx</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="nb">max</span><span class="p">(</span><span class="n">next_tag_vit</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">best_tag_ids</span> <span class="o">=</span> <span class="n">idx</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+            
+            <span class="c1"># Get unary scores at current time step.
+</span>            <span class="n">unary_features</span> <span class="o">=</span> <span class="n">input_features</span><span class="p">[:,</span> <span class="n">t</span><span class="p">,</span> <span class="p">:].</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> 
+                                                          <span class="bp">self</span><span class="p">.</span><span class="n">num_tags</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                                                          
+            <span class="c1"># Add the unary features and assign forward_vit to the set
+</span>            <span class="c1"># of viterbi variables we just computed.
+</span>            <span class="n">forward_vit</span> <span class="o">=</span> <span class="p">(</span><span class="n">viterbivars_t</span> <span class="o">+</span> <span class="n">unary_features</span><span class="p">.</span><span class="n">squeeze</span><span class="p">(</span><span class="mi">2</span><span class="p">)).</span><span class="n">view</span><span class="p">(</span>
+                                        <span class="n">batch_size</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+
+            <span class="c1"># Save the best tags as backpointers.
+</span>            <span class="n">backpointers</span><span class="p">[:,</span> <span class="n">t</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="n">best_tag_ids</span><span class="p">.</span><span class="nb">long</span><span class="p">()</span>
+
+        <span class="c1"># Get final ending sequences and calculate the best last tags
+</span>        <span class="n">ending</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">nonzero</span><span class="p">(</span><span class="n">input_lengths</span> <span class="o">==</span> <span class="n">sequence_length</span><span class="p">)</span>
+        <span class="n">ending</span> <span class="o">=</span> <span class="n">ending</span><span class="p">.</span><span class="n">cuda</span><span class="p">()</span> <span class="k">if</span> <span class="n">torch</span><span class="p">.</span><span class="n">cuda</span><span class="p">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="n">ending</span>
+        <span class="n">n_ending</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ending</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">n_ending</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+
+            <span class="n">forward_ending</span> <span class="o">=</span> <span class="n">forward_vit</span><span class="p">[</span>
+                        <span class="p">(</span><span class="n">num_examples_left</span> <span class="o">-</span> <span class="n">n_ending</span><span class="p">):</span><span class="n">num_examples_left</span><span class="p">]</span>
+
+            <span class="c1"># transition to STOP_TAG
+</span>            <span class="n">last_transitions</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[:,</span> <span class="bp">self</span><span class="p">.</span><span class="n">end_idx</span><span class="p">].</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">terminal_var</span> <span class="o">=</span> <span class="n">forward_ending</span> <span class="o">+</span> <span class="n">last_transitions</span>
+            <span class="n">path_scores</span><span class="p">,</span> <span class="n">best_tag_idx</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="nb">max</span><span class="p">(</span><span class="n">terminal_var</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">tag</span><span class="p">,</span> <span class="n">score</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">best_tag_idx</span><span class="p">)),</span>
+                                  <span class="nb">reversed</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">path_scores</span><span class="p">))):</span>
+                <span class="n">best_last_tags</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+                <span class="n">best_path_scores</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">score</span><span class="p">)</span>
+        
+        <span class="c1"># Backtracking (see code below). 
+</span>        <span class="p">...</span></code></pre></figure>
+
+<p>Everything in the code above hopefully becomes clear with the equations with annotations given above the code. 
+Below I took out a piece of code that’s inside if the <code class="language-plaintext highlighter-rouge">if</code>-statements in the code above. What happens is that we calculate:</p>
+
+<p>\(\hat{y}^{\prime}_m = arg\max_{y^{\prime}_m}\underbrace{\boldsymbol{\theta}_2 f(y^{\prime}_m, y^{\prime}_{m+1})}_{\text{trans_to_end}} + \underbrace{\hat{v}_{m-1}(y^{\prime}_m)}_{\text{forward_ending}}\),</p>
+
+<p>for every example that is ending at that time \(t\), i.e., \(t = m\), and for \(y^{\prime}_{m+1}\) the <code class="language-plaintext highlighter-rouge">&lt;EOS&gt;</code>-tag.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">if</span> <span class="n">n_ending</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+
+        <span class="c1"># Get the viterbi vars of the ending sequences.
+</span>        <span class="c1"># Important here is that the sequences are ordered descending in 
+</span>        <span class="c1"># length. Meaning the last sequences are ending the first.
+</span>        <span class="n">forward_ending</span> <span class="o">=</span> <span class="n">forward_vit</span><span class="p">[</span>
+            <span class="p">(</span><span class="n">num_examples_left</span> <span class="o">-</span> <span class="n">n_ending</span><span class="p">):</span><span class="n">num_examples_left</span><span class="p">]</span>
+
+        <span class="c1"># The terminal var giving the best last tag is 
+</span>        <span class="c1"># the viterbi variables + trans. prob. to end token.
+</span>        <span class="n">trans_to_end</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">log_transitions</span><span class="p">[:,</span> <span class="bp">self</span><span class="p">.</span><span class="n">end_idx</span><span class="p">]</span>
+        <span class="n">terminal_var</span> <span class="o">=</span> <span class="n">forward_ending</span> <span class="o">+</span> <span class="n">trans_to_end</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        
+        <span class="c1"># Get the final best score and tag for these seequences.    
+</span>        <span class="n">path_scores</span><span class="p">,</span> <span class="n">best_tag_idx</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="nb">max</span><span class="p">(</span><span class="n">terminal_var</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># First sequence to end is last sequence in batch, so if 
+</span>        <span class="c1"># we save them like this and reverse the lists
+</span>        <span class="c1"># later on we get the right ordering back.
+</span>        <span class="k">for</span> <span class="n">tag</span><span class="p">,</span> <span class="n">score</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">best_tag_idx</span><span class="p">)),</span> 
+                              <span class="nb">reversed</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">path_scores</span><span class="p">))):</span>
+            <span class="n">best_last_tags</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+            <span class="n">best_path_scores</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">score</span><span class="p">)</span>
+
+        <span class="c1"># Update counter that tracks how many sequences haven't ended.
+</span>        <span class="n">num_examples_left</span> <span class="o">-=</span> <span class="n">n_ending</span></code></pre></figure>
+
+<p>We do the same calculation outside of the loop over time for all the sequences that have the maximum sequence length
+in the batch. Then int the end we have all the backpointers and scores initialized, and we can start the backtracking.
+In the lists <code class="language-plaintext highlighter-rouge">best_last_tags</code> we appended the final tags that maximized the ending sequences, starting with the shortest
+sequences in the batch. When we make sure to sort all the sequences in the batch in descending order,
+we can simply reverse <code class="language-plaintext highlighter-rouge">best_last_tags</code> to get the original ordering back. In the code below, we then put these tags in the initialized
+matrix <code class="language-plaintext highlighter-rouge">best_paths</code> that should hold the maximizing sequence for each example. This means <code class="language-plaintext highlighter-rouge">best_paths</code> looks like the image below before we loop backwards over time:</p>
+
+<p><img src="/images/best_paths.png" alt="bestpaths" /></p>
+
+<p>(depending on how long each sequence in the batch is the actual batch might look differently).
+Then we loop backwards over time, following the backpointers, and fill the <code class="language-plaintext highlighter-rouge">best_paths</code> for each time in the sequence.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">viterbi_decode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_features</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
+                   <span class="n">input_lengths</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="s">"""
+        Find the maximum scoring tag sequence for each example in the batch.
+        
+        :param input_features: the features for each input sequence
+            [batch_size, sequence_length, num_tags] 
+        :param target_tags:
+        :param input_lengths: lengths of each example in the batch [batch_size]
+        
+        Returns: tuple of scores and tag sequences per example in the batch.
+        """</span>           
+        
+        <span class="c1"># Forward Recursion (see code above).
+</span>        <span class="p">...</span>
+        
+        <span class="c1"># Reverse the best last tags (and scores) to get the original order.
+</span>        <span class="n">best_last_tags</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">LongTensor</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">best_last_tags</span><span class="p">)))</span>
+        <span class="k">if</span> <span class="n">torch</span><span class="p">.</span><span class="n">cuda</span><span class="p">.</span><span class="n">is_available</span><span class="p">()</span>
+            <span class="n">best_last_tags</span> <span class="o">=</span> <span class="n">best_last_tags</span><span class="p">.</span><span class="n">cuda</span><span class="p">()</span>
+        <span class="n">best_path_scores</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">LongTensor</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">best_path_scores</span><span class="p">)))</span>
+        <span class="k">if</span> <span class="n">torch</span><span class="p">.</span><span class="n">cuda</span><span class="p">.</span><span class="n">is_available</span><span class="p">():</span>
+            <span class="n">best_path_scores</span> <span class="o">=</span> <span class="n">best_path_scores</span><span class="p">.</span><span class="n">cuda</span><span class="p">()</span>
+
+        <span class="c1"># Initialize the best paths for each sequence in the batch by
+</span>        <span class="c1"># putting at the correct length for each example
+</span>        <span class="c1"># the best last tag found in the above recursion.
+</span>        <span class="c1"># This is depicted in the image above.
+</span>        <span class="n">best_paths</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">sequence_length</span> <span class="o">+</span> <span class="mi">1</span><span class="p">).</span><span class="nb">long</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">torch</span><span class="p">.</span><span class="n">cuda</span><span class="p">.</span><span class="n">is_available</span><span class="p">():</span>
+            <span class="n">best_paths</span> <span class="o">=</span> <span class="n">best_paths</span><span class="p">.</span><span class="n">cuda</span><span class="p">()</span>
+        <span class="n">best_paths</span> <span class="o">=</span> <span class="n">best_paths</span><span class="p">.</span><span class="n">index_put_</span><span class="p">(</span>
+            <span class="p">(</span><span class="n">torch</span><span class="p">.</span><span class="n">LongTensor</span><span class="p">([</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">backpointers</span><span class="p">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">))]),</span>
+             <span class="n">input_lengths</span><span class="p">),</span>
+            <span class="n">best_last_tags</span><span class="p">)</span>
+
+        <span class="c1"># A counter keeping track of number of active sequences.
+</span>        <span class="c1"># This increases from 0 until batch_size at the last time step
+</span>        <span class="c1"># when even the shortest sequence is active.
+</span>        <span class="n">num_active</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># Loop backwards over time (max. time to 0).
+</span>        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">sequence_length</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">):</span>
+
+            <span class="c1"># If time step equals lengths of some sequences, they are starting.
+</span>            <span class="c1"># (starting meaning this time step is their last tag).
+</span>            <span class="n">starting</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">nonzero</span><span class="p">(</span><span class="n">input_lengths</span> <span class="o">-</span> <span class="mi">1</span> <span class="o">==</span> <span class="n">t</span><span class="p">)</span>
+            <span class="n">n_starting</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">starting</span><span class="p">)</span>
+
+            <span class="c1"># If there are sequences starting, grab their best last tags.
+</span>            <span class="k">if</span> <span class="n">n_starting</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="c1"># For the longest sequences, initialize best_tag_id.
+</span>                <span class="k">if</span> <span class="n">t</span> <span class="o">==</span> <span class="n">sequence_length</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="n">best_tag_id</span> <span class="o">=</span> <span class="n">best_paths</span><span class="p">[</span><span class="n">num_active</span><span class="p">:</span><span class="n">num_active</span> <span class="o">+</span> <span class="n">n_starting</span><span class="p">,</span>
+                                             <span class="n">t</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">last_tags</span> <span class="o">=</span> <span class="n">best_paths</span><span class="p">[</span><span class="n">num_active</span><span class="p">:</span><span class="n">num_active</span> <span class="o">+</span> <span class="n">n_starting</span><span class="p">,</span>
+                                           <span class="n">t</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+                    <span class="n">best_tag_id</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">cat</span><span class="p">((</span><span class="n">best_tag_id</span><span class="p">,</span> 
+                                             <span class="n">last_tags</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+                <span class="c1"># Update the number of active sequences.
+</span>                <span class="n">num_active</span> <span class="o">+=</span> <span class="n">n_starting</span>
+
+            <span class="c1"># Get relevant backpointers based on sequences that are active.
+</span>            <span class="n">active</span> <span class="o">=</span> <span class="n">backpointers</span><span class="p">[:</span><span class="n">num_active</span><span class="p">,</span> <span class="n">t</span><span class="p">]</span>
+
+            <span class="c1"># Follow the backpointers to the best previous tag.
+</span>            <span class="n">best_tag_id</span> <span class="o">=</span> <span class="n">best_tag_id</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="n">num_active</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">best_tag_id</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="n">active</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">best_tag_id</span><span class="p">)</span>
+            <span class="n">best_paths</span><span class="p">[:</span><span class="n">num_active</span><span class="p">,</span> <span class="n">t</span><span class="p">]</span> <span class="o">=</span> <span class="n">best_tag_id</span><span class="p">.</span><span class="n">squeeze</span><span class="p">()</span>
+
+        <span class="c1"># Sanity check that first tag is the &lt;ROOT&gt; token.
+</span>        <span class="k">assert</span> <span class="p">(</span><span class="n">best_paths</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">].</span><span class="nb">sum</span><span class="p">().</span><span class="n">item</span><span class="p">()</span> \
+                    <span class="o">==</span> <span class="n">best_paths</span><span class="p">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="bp">self</span><span class="p">.</span><span class="n">root_idx</span><span class="p">)</span>
+        
+        <span class="c1"># Return the scores and the paths without the &lt;ROOT&gt; token.
+</span>        <span class="k">return</span> <span class="n">best_path_scores</span><span class="p">,</span> <span class="n">best_paths</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">:]</span></code></pre></figure>
+
+<p>In the above code, at every time step (for the active sequences) we use the previous best tags, starting with
+the best last tags, to find the correct backpointer to follow back. Now <code class="language-plaintext highlighter-rouge">backpointers</code> is a matrix of size <code class="language-plaintext highlighter-rouge">[batch_size, sequence_length, num_tags]</code> (where
+the batch is still sorted in descending order) and holds at every time \(t\) the backpointers (i.e., ids of previous tags
+that maximize the sequence) for every tag. See this for one example in a batch depicted below:</p>
+
+<p><img src="/images/backpointers.png" alt="bestpaths" /></p>
+
+<p>Now <code class="language-plaintext highlighter-rouge">best_last_tags</code> holds the tag to start backtracking with for every example, which might be a verb like depicted above.
+Based on this last tag you just need to follow the path backward to find the correct sequence. Selecting the backpointer
+is what happens in the following lines (where <code class="language-plaintext highlighter-rouge">active</code> holds the backpointers for the active sequences):</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c1"># Follow the backpointers to the best previous tag.
+</span><span class="n">best_tag_id</span> <span class="o">=</span> <span class="n">best_tag_id</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="n">num_active</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="n">best_tag_id</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="n">active</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">best_tag_id</span><span class="p">)</span>
+<span class="n">best_paths</span><span class="p">[:</span><span class="n">num_active</span><span class="p">,</span> <span class="n">t</span><span class="p">]</span> <span class="o">=</span> <span class="n">best_tag_id</span><span class="p">.</span><span class="n">squeeze</span><span class="p">()</span></code></pre></figure>
+
+<p>In the end, <code class="language-plaintext highlighter-rouge">best_paths</code> holds the maximizing sequence for every example in the batch, starting at the <code class="language-plaintext highlighter-rouge">&lt;ROOT&gt;</code> tag.
+We return the scores and the sequences without the root and we are done!</p>
+
+<p>Go to <a href="/2021/01/25/crfpt3.html">part three</a> to train this model on real POS tagging data!</p>
 
 <h1 id="sources"><span style="color:#2874A6">Sources</span></h1>
-
-<p>Natalia Silveira and Timothy Dozat and Marie-Catherine de Marneffe and Samuel Bowman and
-    Miriam Connor and John Bauer and Christopher D. Manning (2014).
-    <a href="https://www.aclweb.org/anthology/L14-1067/" target="_blank"><em>A Gold Standard Dependency Corpus for English</em></a></p>
 
 <p>Xuezhe Ma and Eduard H. Hovy. 2016. <a href="https://arxiv.org/pdf/1603.01354.pdf" target="_blank"><em>End-to-end
 sequence labeling via bi-directional LSTM-CNN-CRF</em></a>. In ACL.</p>
 
-<h1 id="further-reading"><span style="color:#2874A6">Further Reading</span></h1>
-
-<p>…</p>
+<p>Matt Gardner and Joel Grus and Mark Neumann and Oyvind Tafjord
+    and Pradeep Dasigi and Nelson F. Liu and Matthew Peters and
+    Michael Schmitz and Luke S. Zettlemoyer. 2017 <a href="https://www.semanticscholar.org/paper/A-Deep-Semantic-Natural-Language-Processing-Gardner-Grus/a5502187140cdd98d76ae711973dbcdaf1fef46d" target="_blank"><em>AllenNLP: A Deep Semantic Natural Language Processing Platform.</em></a></p>
 
   </div><a class="u-url" href="/2021/01/25/crfpt2.html" hidden></a>
 </article>
