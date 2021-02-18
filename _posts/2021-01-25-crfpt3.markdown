@@ -1,1 +1,11 @@
 
+---
+layout: post
+title:  "Structured Prediction part three - Training a linear-chain CRF"
+date:   2021-01-25 13:09:17 -0500
+usemathjax: true
+---
+
+<script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+
+Coming soon!
