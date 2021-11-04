@@ -9,7 +9,7 @@ hidden: true
 <img src="/images/figure1.png" alt="An image of three plots, each of which is a stack of multiple plots for different d. Showing MC estimates of the probability
 that a new sample lies in the convex hull of N other samples." class="center"/>
 
-In this post I'll attempt to shed some light on the conclusion that is drawn (in part) from the above image:
+In this post I'll attempt to shed some light on the conclusion that is drawn (in part[^1]) from the above image:
 
 *We shouldn't use interpolation/extrapolation when talking about generalization, because for high dimensional data deep learning models are
 always extrapolating, regardless of the dimension of the underlying data manifold.*
@@ -456,7 +456,7 @@ def plot_probabilities(x_space_per_dimension, dimensions, probabilities):
 for increasing d you need exponentially more N to keep increasing the probability of lying in the convex hull. The left plot has 10 points per d,
 the right has much more points per d." width="800" class="center"/>
 
-Jippie[^1]! There it is! So beautiful. Very reproduce. Much similar. 
+Jippie[^2]! There it is! So beautiful. Very reproduce. Much similar. 
 
 ## <span style="color:#C0392B">Reproducing the Second Plot</span>
 > **_In this section:_**  Intrinsic dimension, Data Manifold, Quadratic Programming
@@ -536,7 +536,7 @@ Raised when Qhull encounters an error condition, such as geometrical degeneracy
 when options to resolve are not enabled.
 ```
 
-Instead, we will frame it as a quadratic programming problem[^2] and solve it with a QP solver that can handle degeneracy. 
+Instead, we will frame it as a quadratic programming problem[^3] and solve it with a QP solver that can handle degeneracy. 
 
 We want to find the coefficients such that $$\boldsymbol{\lambda}_1 \mathbf{x}_1 + \dots + \boldsymbol{\lambda}_N \mathbf{x}_N = \mathbf{x}$$. 
 The constraints on the $$\boldsymbol{\lambda}$$'s also need to be taken care of. If we can find coefficients that satisfy these constraints, 
@@ -942,7 +942,13 @@ this blogpost for yourself and change it!
 What we learned now is that *no matter the underlying intrinsic dimension of your data manifold*, for increasing convex hull
 dimensions we need exponentially more data to have any chance of being in interpolation regime. Now at this points, that
 doesn't sound too surprising anymore, since we defined interpolation regime as the convex hull. But that's precisely
-what this paper has achieved, it illuminated some of the terms that were previously undefined in the debate, and made them unsurprising. Now of course, like the authors of this paper also acknowledge, this doesn't mean
+what this paper has achieved, it illuminated some of the terms that were previously undefined in the debate, and made them unsurprising. 
+Of course you might say that everything is very different for real-world data and for expressive deep learning models that 
+have a much better behaved representation space for this data. What the authors show however in the paper beyond Figure 1, is
+that the same conclusions hold; despite the likely lower dimensional intrinsic data manifold of natural images, finding samples in
+interpolation regime becomes exponentially difficult with respect to the considered ambient data dimension, and current deep learning
+methods almost surely operate in an extrapolation regime in both the data and their embedding space.
+Now of course, like the authors of this paper also acknowledge, this doesn't mean
 that deep learning methods are perfect. What definition for interpolation/extrapolation should we then take if we are
 talking about the relation to generalization performance? <a href="https://twitter.com/fchollet/status/1450524400227287040" target="_blank">Here</a> is
 one answer from another researcher. I would be interested to see more.
@@ -975,9 +981,9 @@ Randall Balestriero and Jerome Pesenti and Yann LeCun (2021).
 Barany, I. and Furedi, Z. (1988). 
 <a href="https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.726.8687&rep=rep1&type=pdf" target="_blank">*On the shape of the convex hull of random points.*</a>
 
-
-[^1]: Jippie means "Yippie" in Dutch.
-[^2]: You could also <a href="https://math.stackexchange.com/questions/1511112/test-if-point-is-in-convex-hull-of-n-points" target="_blank">frame it as a linear programming problem.</a>
+[^1]: The experiments that mostly endorse this conclusion are the experiments on real datasets in the paper.
+[^2]: Jippie means "Yippie" in Dutch.
+[^3]: You could also <a href="https://math.stackexchange.com/questions/1511112/test-if-point-is-in-convex-hull-of-n-points" target="_blank">frame it as a linear programming problem.</a>
 
 # Todo's
 - Clean code and put on github and add link
