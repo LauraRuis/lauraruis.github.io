@@ -2,10 +2,12 @@
 layout: post
 title:  "Learning in High Dimensions Always Amounts to Extrapolation"
 usemathjax: true
+hidden: true
 ---
 <script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
 
-![figure1](/images/figure1.png)
+<img src="/images/figure1.png" alt="An image of three plots, each of which is a stack of multiple plots for different d. Showing MC estimates of the probability
+that a new sample lies in the convex hull of N other samples." class="center"/>
 
 In this post I'll attempt to shed some light on the conclusion that is drawn (in part) from the above image:
 
@@ -96,7 +98,7 @@ for simplex in hull.simplices:
   plt.plot(hull_samples[simplex, 0], hull_samples[simplex, 1], 'k')
 {% endhighlight %}
 
-<img src="/images/2d_convexhull.png" alt="2d_convexhull" width="400" class="center"/>
+<img src="/images/2d_convexhull.png" alt="A plot in R2 of 4 points forming a box, one point in the box, and one point outside." width="400" class="center"/>
 
 Everything within (or on) this square is a convex combination of the convex hull of the four samples, everything outside
 it but still in $$\mathbb{R}^2$$ is an *affine combination* of the samples, relaxing the constraints on the $$\lambda_i$$'s. Note that we can easily
@@ -175,7 +177,7 @@ for i in range(4):
           [Z[idx], Z[idx_right+3]], color = 'k', zorder=10)
 {% endhighlight %}
 
-<img src="/images/3d_convexhull.png" alt="3d_convexhull" width="400" class="center"/>
+<img src="/images/3d_convexhull.png" alt="A plot in R3 of 8 points forming a cube with several points inside the cube and several points outside the cube." width="400" class="center"/>
 
 This cube has a volume of one, and the probability of lying within this cube has become:
 
@@ -205,7 +207,7 @@ we need to exponentially increase the number of datapoints $$N$$ for increasing 
 being in interpolation regime. See below this boundary of minimal $$N$$ needed
  plotted ($$N = d^{-1}2^{d/2}$$).
 
-<img src="/images/evolution_N.png" alt="evolution_N" width="400" class="center"/>
+<img src="/images/evolution_N.png" alt="A plot showing that for increasing d on the X-axis, N increases exponentially on the Y-axis." width="400" class="center"/>
 
 In this section we learned what the convex hull of datapoints is, and what it means to be interpolating or extrapolating w.r.t. the
 convex hull of samples. We got some intuition about the curse of dimensionality, and might already see why it is pretty unlikely
@@ -219,7 +221,8 @@ convex hull of samples. We got some intuition about the curse of dimensionality,
 ## <span style="color:#C0392B">Reproducing the First Plot</span>
 > **_In this section:_**  Ambient dimension
 
-<img src="/images/first_plot.png" alt="firstplot" width="400" class="center"/>
+<img src="/images/first_plot.png" alt="A plot with log(N) on the X-axis and the probability of lying in the convex hull on the Y-axis, showing that
+for increasing d you need exponentially more N to keep increasing the probability of lying in the convex hull." width="400" class="center"/>
 
 This image is a stack of six plots. Each plot shows the estimated
 probability that a new sample from a Gaussian with dimension $$d$$ will lie in the convex hull of $$N$$ training samples of this
@@ -276,7 +279,7 @@ plt.hist(samples[:, 1], bins=25, density=True, alpha=0.5, color='b')
 plt.hist(samples[:, 2], bins=25, density=True, alpha=0.5, color='r')
 {% endhighlight %}
 
-<img src="/images/gauss_samples.png" alt="gaussamples" width="400" class="center"/>
+<img src="/images/gauss_samples.png" alt="A histogram with three overlapping Gaussian distributions." width="400" class="center"/>
 
 **Probability of lying in the convex hull** \\
 Recall that a vector $$\mathbf{x}$$ lies within the convex hull spanned by samples $$\mathbf{x}_1, \dots, \mathbf{x}_N \in \mathbb{R}^d$$ 
@@ -449,14 +452,17 @@ def plot_probabilities(x_space_per_dimension, dimensions, probabilities):
 {% endhighlight %}
 </details>
 
-<img src="/images/left_plot.png" alt="leftplot" width="800" class="center"/>
+<img src="/images/left_plot.png" alt="Two plots next to eachother, both with log(N) on the X-axis and the probability of lying in the convex hull on the Y-axis, showing that
+for increasing d you need exponentially more N to keep increasing the probability of lying in the convex hull. The left plot has 10 points per d,
+the right has much more points per d." width="800" class="center"/>
 
 Jippie[^1]! There it is! So beautiful. Very reproduce. Much similar. 
 
 ## <span style="color:#C0392B">Reproducing the Second Plot</span>
 > **_In this section:_**  Intrinsic dimension, Data Manifold, Quadratic Programming
 
-<img src="/images/second_plot.png" alt="secondplot" width="300" class="center"/>
+<img src="/images/second_plot.png" alt="A plot with log(N) on the X-axis and the probability of lying in the convex hull on the Y-axis, showing that
+for increasing d you need exponentially more N to keep increasing the probability of lying in the convex hull." width="300" class="center"/>
 
 The second plot in Figure 1 looks incredibly similar to the first one. The difference lies in the underlying data manifold
 that is sampled from, i.e. the *intrinsic dimension* (denoted by $$\bar{d}$$) will be different. For the first plot, we sampled from a $$d$$-dimensional Gaussian. 
@@ -513,7 +519,8 @@ plt.plot(spline_2d(x)[0, :], spline_2d(x)[1, :])
 plt.plot(spline_10d(x)[0, :], spline_10d(x)[1, :])
 {% endhighlight %}
 
-<img src="/images/1d_manifold.png" alt="1d_manifold" width="800" class="center"/>
+<img src="/images/1d_manifold.png" alt="Two plots showing a spline in R2, the left one makes one curve, the right one
+makes many curves and crosses itself many times." width="800" class="center"/>
 
 In the above image one can see that the spline represented in 10 dimensions on the right is much more wobbly than the one
 that has ambient dimension 2; both have intrinsic dimension 1.
@@ -751,7 +758,9 @@ for dimension_idx, dimension in enumerate(ambient_dimensions):
 >> Working on 7-D
 ```
 
-<img src="/images/middle_plot.png" alt="middleplot" width="800" class="center"/>
+<img src="/images/middle_plot.png" alt="Two plots next to eachother, both with log(N) on the X-axis and the probability of lying in the convex hull on the Y-axis, showing that
+for increasing d you need exponentially more N to keep increasing the probability of lying in the convex hull. The left plot has 10 points per d,
+the right has much more points per d." width="800" class="center"/>
 
 We can see that even though we cheated by only sampling the data points once per ambient dimension, and
 only doing 100 Monte-Carlo trials instead of 500000, we get away with it!
@@ -759,7 +768,8 @@ only doing 100 Monte-Carlo trials instead of 500000, we get away with it!
 ## <span style="color:#C0392B">Reproducing the Final Plot</span>
 > **_In this section:_**  Convex Hull Dimension
 
-<img src="/images/third_plot.png" alt="thirdplot" width="300" class="center"/>
+<img src="/images/third_plot.png" alt="A plot with log(N) on the X-axis and the probability of lying in the convex hull on the Y-axis, showing that
+for increasing d if you keep d* the same you don't need exponentially more N to keep increasing the probability of lying in the convex hull." width="300" class="center"/>
 
 The final plot requires the introduction of some new terminology; it's the plot that answers the question: 
 "so how can we control the probability of interpolating, i.e. of a new sample lying in the convex hull"? 
@@ -772,7 +782,8 @@ If we take 4 points that lie on a plane, like in the middle below, we have ambie
 dimension of 2. Finally, if we take the full set of 8 data points, we get a convex hull dimension of 3, which equals
  the ambient dimension. This convex hull dimension is denoted by $$d^*$$ in the paper.
 
-<img src="/images/convexhull_ds.png" alt="convexhull_ds" width="800" class="center"/>
+<img src="/images/convexhull_ds.png" alt="Three 3D plots next to eachother, one with a line between 2 points,
+one with a plane square between 4 points, and one with a cube between 8 points." width="800" class="center"/>
 
 Now what we do to reproduce the final plot, is show that if we keep the convex hull dimension $$d^*$$ similar,
 but increase the ambient dimension, it doesn't have the effect it had before anymore! We don't need more datapoints $$N$$
@@ -918,7 +929,9 @@ for dimension_idx, dimension in enumerate(ambient_dimensions):
 >> Working on 7-D
 ```
 
-<img src="/images/right_plot_repro.png" alt="right_plot_repro" width="700" class="center"/>
+<img src="/images/right_plot_repro.png" alt="Two plots next to eachother, both with log(N) on the X-axis and the probability of lying in the convex hull on the Y-axis, showing that
+for increasing d if you keep d* the same you don't need exponentially more N to keep increasing the probability of lying in the convex hull. The left plot has 10 points per d,
+the right has much more points per d." width="700" class="center"/>
 
 And we're done! If it's also a thorn in your eye that the colors of these plots don't match, go check out 
 <a href="todo: insert github link" target="_blank">the code</a> for
@@ -929,15 +942,15 @@ this blogpost for yourself and change it!
 What we learned now is that *no matter the underlying intrinsic dimension of your data manifold*, for increasing convex hull
 dimensions we need exponentially more data to have any chance of being in interpolation regime. Now at this points, that
 doesn't sound too surprising anymore, since we defined interpolation regime as the convex hull. But that's precisely
-what this paper has done, it illuminated some of the terms that were previously undefined in the debate. Now of course, like the authors of this paper also acknowledge, this doesn't mean
-that deep learning methods are perfect. And what definition for interpolation/extrapolation should we then take if we are
+what this paper has achieved, it illuminated some of the terms that were previously undefined in the debate, and made them unsurprising. Now of course, like the authors of this paper also acknowledge, this doesn't mean
+that deep learning methods are perfect. What definition for interpolation/extrapolation should we then take if we are
 talking about the relation to generalization performance? <a href="https://twitter.com/fchollet/status/1450524400227287040" target="_blank">Here</a> is
-one answer. Perhaps there are more.
+one answer from another researcher. I would be interested to see more.
 
 # <span style="color:#C0392B">Disclaimers</span>
 
-I don't claim to fully understand what is going on in this paper still, and the methods I used to obtain data with certain
-dimensionalities might be flawed or wrong. If you have comments, don't hesitate to reach out on my 
+I don't claim to fully understand what is going on in this paper still, and there are other, perhaps better, methods to obtain data with certain
+dimensionalities than the ones I used. If you have comments or questions, don't hesitate to reach out on my 
 <a href="https://twitter.com/LauraRuis" target="_blank">twitter</a>.
 
 
@@ -967,6 +980,4 @@ Barany, I. and Furedi, Z. (1988).
 [^2]: You could also <a href="https://math.stackexchange.com/questions/1511112/test-if-point-is-in-convex-hull-of-n-points" target="_blank">frame it as a linear programming problem.</a>
 
 # Todo's
-- Alt text for images
-- Check intuition with email from Randall
 - Clean code and put on github and add link
