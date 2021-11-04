@@ -1,0 +1,180 @@
+I"�d<script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+
+<p><img src="/images/figure1.png" alt="figure1" /></p>
+
+<p>This blog post is going to be about the above image, taken from 
+<a href="https://arxiv.org/pdf/2110.09485.pdf" target="_blank">Balestriero, Pesenti, and LeCun, 2021.</a> The goal is to reproduce it, and in the process of doing
+that getting a better understanding of what this whole interpolation/extrapolation debate 
+(<a href="https://twitter.com/ylecun/status/1409940043951742981" target="_blank">here</a> and
+<a href="https://twitter.com/GaryMarcus/status/1411401507610796032" target="_blank">here</a> and
+<a href="https://twitter.com/fchollet/status/1450524400227287040" target="_blank">here</a>) is about. I mean, I have to be honest,
+after this post this whole debate is not going to be any clearer. David Hume can describe quite nicely what is probably 
+going on in this discussion in his <em>“an enquiry concerning human understanding”</em>:</p>
+
+<blockquote>
+  <p>It might reasonably be expected, in questions, which have been canvassed and disputed with great eagerness, since the 
+first origin of science and philosophy, that the meaning of all terms, at least, should have been agreed upon among the
+disputants; and our enquiries, in the course of two thousand years, have been able to pass from words to the true and 
+real subject of the controversy. For how easy may it seem to give exact definitions of the terms employed in reasoning,
+and make these definitions, not the mere sounds of words, the object of future scrutiny and examination? But if we consider
+the matter more narrowly, we shall be apt to draw a quite opposite conclusion. From this circumstance alone, that a 
+controversy has been long kept on foot, and remains still undecided, we may presume, that there is some ambiguity in
+the expression, and that the disputants affix different ideas to the terms employed in the controversy.</p>
+</blockquote>
+
+<p>Basically; people seem to argue a lot about things that they haven’t defined properly (and the
+last author on this paper <a href="https://twitter.com/ylecun/status/1450809828268548101" target="_blank">probably agrees</a>). 
+Didn’t this quote make you think that I’m really smart just now?! Well think again, I didn’t read the book, the 
+reason I’m writing this blogpost is because I didn’t understand the learning in high dimensions
+paper at all on first reading, and wanted to get a better understanding.</p>
+
+<p>After this post, we will hopefully know more about the following terms:</p>
+
+<ul>
+  <li>The curse of dimensionality (section ..)</li>
+  <li>Convex hull (section ..)</li>
+  <li>Ambient dimension (section ..)</li>
+  <li>Intrinsic dimension / Data manifold dimension (section ..)</li>
+</ul>
+
+<h2 id="the-key-idea"><span style="color:#C0392B">The Key Idea</span></h2>
+<p>The key idea in this paper is that we shouldn’t be using interpolation and extrapolation as indicators
+of generalization performance, because models are almost surely extrapolating. It doesn’t matter what the intrinsic dimension
+of the data manifold is, which may be much lower than the dimensionality of our data representation. The authors hope that
+the paper opens the door to better suited geometrical definitions of interpolation and extrapolation that align
+with generalization performances in the context of high dimensional data. So let’s dive in!</p>
+
+<h1 id="when-are-we-interpolating"><span style="color:#C0392B">When are we interpolating?</span></h1>
+<blockquote>
+  <p><strong><em>Tags:</em></strong>  Interpolation, Extrapolation, Convex Hull, Curse of Dimensionality</p>
+</blockquote>
+
+<p>The definition of interpolating in the paper is the following:</p>
+
+<p><strong>Definition 1</strong>. Interpolation occurs for a sample \(\mathbf{x}\) whenever this sample belongs to the convex hull of a 
+set of samples \(\mathbf{X} \triangleq \{\mathbf{x}_1, \dots, \mathbf{x}_N\}\), if not, extrapolation occurs.</p>
+
+<p>So what is the <strong>convex hull</strong> of a set of samples? A vector \(\mathbf{x}\) lies within the convex hull of a set of samples
+\(\mathbf{x}_1, \dots, \mathbf{x}_N\) if we can write it as a convex combination of the samples:</p>
+
+\[\mathbf{x} = \lambda_1 \mathbf{x}_1 + \dots + \lambda_N \mathbf{x}_N\]
+
+<p>Subject to the constraints that the \(\lambda_i\)’s are nonnegative and sum to one: \(\lambda_i \geq 0\) and \(\sum_i \lambda_i = 1\).
+Let’s have a look at what that means in a dimension we can still visualize.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c1"># Make up some samples that happen to form a nice square in R2.
+</span><span class="n">hull_samples</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">array</span><span class="p">([[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span>
+                         <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span>
+                         <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span>
+                         <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">]])</span>
+                         
+<span class="c1"># Here's a point that is a convex combination of the hull samples ..
+</span><span class="n">point_in_hull</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">array</span><span class="p">([[</span><span class="mf">1.5</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">]])</span>
+
+<span class="c1"># .. and here's one that isn't.
+</span><span class="n">point_outside_hull</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">array</span><span class="p">([[</span><span class="mf">2.5</span><span class="p">,</span> <span class="mi">2</span><span class="p">]])</span>
+
+<span class="c1"># Calculate the convex hull with scipy.spatial.ConvexHull
+</span><span class="n">hull</span> <span class="o">=</span> <span class="n">ConvexHull</span><span class="p">(</span><span class="n">hull_samples</span><span class="p">)</span>
+
+<span class="c1"># Let's plot it.
+</span><span class="n">plt</span><span class="p">.</span><span class="n">plot</span><span class="p">(</span><span class="n">hull_samples</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">hull_samples</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span> <span class="s">'o'</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="s">'navy'</span><span class="p">)</span>
+<span class="n">plt</span><span class="p">.</span><span class="n">plot</span><span class="p">(</span><span class="n">point_in_hull</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">point_in_hull</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span> <span class="s">'o'</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="s">'lightgreen'</span><span class="p">)</span>
+<span class="n">plt</span><span class="p">.</span><span class="n">plot</span><span class="p">(</span><span class="n">point_outside_hull</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">point_outside_hull</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span> <span class="s">'o'</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="s">'tomato'</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">simplex</span> <span class="ow">in</span> <span class="n">hull</span><span class="p">.</span><span class="n">simplices</span><span class="p">:</span>
+  <span class="n">plt</span><span class="p">.</span><span class="n">plot</span><span class="p">(</span><span class="n">hull_samples</span><span class="p">[</span><span class="n">simplex</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">hull_samples</span><span class="p">[</span><span class="n">simplex</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="s">'k'</span><span class="p">)</span></code></pre></figure>
+
+<p><img src="/images/2d_convexhull.png" alt="2d_convexhull" width="400" class="center" /></p>
+
+<p>Everything within (or on) this square is a convex combination of the convex hull of the four samples, everything outside
+it is an <em>affine combination</em> of the samples, relaxing the constraints on the \(\lambda_i\)’s. Note that we can easily
+calculate the probability of lying within the convex hull of samples here if we assume that all values will lie between zero
+and three. Let’s say we sample points uniformly between zero and three for both dimensions, then the probability of a new 
+sample to lie within the convex hull from this subspace is the area of the convex hull divided by the total area:</p>
+
+\[p(\mathbf{x} \in \text{Hull}(\mathbf{X})) = \frac{1}{9}\]
+
+<p>In general, for a convex hull with area \(c\) in \(\mathbb{R}^2\) and data points between \([x_0, x_1]\) the probability of 
+lying in the convex hull is \(\frac{c}{(x_1 - x_0)^2}\).</p>
+
+<p>Now let’s see what happens if we move to three dimensions. We’ll stretch out the square from above into a cube and
+calculate the probability of lying within this cube.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c1"># Make the cube of 3D hull points (8 points, each is a corner of the cube).
+</span><span class="n">X</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span>
+<span class="n">Y</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">])</span>
+<span class="n">Z</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">])</span>
+
+<span class="c1"># Set the same limits as the 2D example.
+</span><span class="n">ax</span><span class="p">.</span><span class="n">set_xlim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="n">ax</span><span class="p">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="n">ax</span><span class="p">.</span><span class="n">set_zlim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+
+<span class="c1"># A function to get a convex combination of a set of points.
+</span><span class="k">def</span> <span class="nf">convex_combination</span><span class="p">(</span><span class="n">points</span><span class="p">):</span>
+  <span class="n">lambdas</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">points</span><span class="p">))</span>
+  <span class="n">lambdas_n</span> <span class="o">=</span> <span class="n">lambdas</span> <span class="o">/</span> <span class="n">np</span><span class="p">.</span><span class="nb">sum</span><span class="p">(</span><span class="n">lambdas</span><span class="p">)</span>
+  <span class="k">return</span> <span class="n">np</span><span class="p">.</span><span class="n">dot</span><span class="p">(</span><span class="n">points</span><span class="p">.</span><span class="n">transpose</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]),</span> <span class="n">lambdas_n</span><span class="p">)</span>
+
+<span class="c1"># A function to get an affine combination of a set of points 
+# that is *not* a convex combination.
+</span><span class="k">def</span> <span class="nf">affine_combination</span><span class="p">(</span><span class="n">points</span><span class="p">):</span>
+  <span class="n">lambdas</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">points</span><span class="p">))</span>
+  <span class="n">lambdas_n</span> <span class="o">=</span> <span class="n">lambdas</span> <span class="o">/</span> <span class="n">np</span><span class="p">.</span><span class="nb">sum</span><span class="p">(</span><span class="n">lambdas</span><span class="p">)</span>
+  <span class="n">offset</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">choice</span><span class="p">([</span><span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mf">0.1</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.02</span><span class="p">),</span>
+                             <span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">0.02</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)])</span>
+  <span class="n">lambdas_n</span> <span class="o">=</span> <span class="n">lambdas_n</span> <span class="o">+</span> <span class="n">offset</span>
+  <span class="k">return</span> <span class="n">np</span><span class="p">.</span><span class="n">dot</span><span class="p">(</span><span class="n">points</span><span class="p">.</span><span class="n">transpose</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]),</span> <span class="n">lambdas_n</span><span class="p">)</span>
+
+<span class="c1"># Plot some convex combinations of the hull data points.
+</span><span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
+  <span class="n">num_points</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+  <span class="n">point_indices</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="n">num_points</span><span class="p">)</span>
+  <span class="n">points</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">array</span><span class="p">([</span><span class="n">X</span><span class="p">[</span><span class="n">point_indices</span><span class="p">],</span> 
+                     <span class="n">Y</span><span class="p">[</span><span class="n">point_indices</span><span class="p">],</span> 
+                     <span class="n">Z</span><span class="p">[</span><span class="n">point_indices</span><span class="p">]]).</span><span class="n">transpose</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+  <span class="n">new_point</span> <span class="o">=</span> <span class="n">convex_combination</span><span class="p">(</span><span class="n">points</span><span class="p">)</span>
+  <span class="n">ax</span><span class="p">.</span><span class="n">scatter</span><span class="p">(</span><span class="o">*</span><span class="n">new_point</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="s">'lightgreen'</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mf">2.5</span><span class="p">)</span>
+
+<span class="c1"># Plot some affine combinations of the hull data points.
+</span><span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
+  <span class="n">num_points</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+  <span class="n">point_indices</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="n">num_points</span><span class="p">)</span>
+  <span class="n">points</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="n">array</span><span class="p">([</span><span class="n">X</span><span class="p">[</span><span class="n">point_indices</span><span class="p">],</span> 
+                     <span class="n">Y</span><span class="p">[</span><span class="n">point_indices</span><span class="p">],</span> 
+                     <span class="n">Z</span><span class="p">[</span><span class="n">point_indices</span><span class="p">]]).</span><span class="n">transpose</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+  <span class="n">new_point</span> <span class="o">=</span> <span class="n">affine_combination</span><span class="p">(</span><span class="n">points</span><span class="p">)</span>
+  <span class="n">ax</span><span class="p">.</span><span class="n">scatter</span><span class="p">(</span><span class="o">*</span><span class="n">new_point</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="s">'tomato'</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mf">12.5</span><span class="p">)</span>
+
+<span class="c1"># Plot the box around the convex hull.
+</span><span class="n">ax</span><span class="p">.</span><span class="n">plot</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">Z</span><span class="p">,</span> <span class="s">'o'</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="s">'navy'</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mf">7.5</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">4</span><span class="p">):</span>
+  <span class="n">idx</span> <span class="o">=</span> <span class="n">i</span>
+  <span class="n">idx_right</span> <span class="o">=</span> <span class="p">(</span><span class="n">idx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="mi">4</span>
+  <span class="n">ax</span><span class="p">.</span><span class="n">plot</span><span class="p">([</span><span class="n">X</span><span class="p">[</span><span class="n">idx</span><span class="p">],</span> <span class="n">X</span><span class="p">[</span><span class="n">idx_right</span><span class="p">]],</span>
+          <span class="p">[</span><span class="n">Y</span><span class="p">[</span><span class="n">idx</span><span class="p">],</span> <span class="n">Y</span><span class="p">[</span><span class="n">idx_right</span><span class="p">]],</span>
+          <span class="p">[</span><span class="n">Z</span><span class="p">[</span><span class="n">idx</span><span class="p">],</span> <span class="n">Z</span><span class="p">[</span><span class="n">idx_right</span><span class="p">]],</span> <span class="n">color</span> <span class="o">=</span> <span class="s">'k'</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+  <span class="n">ax</span><span class="p">.</span><span class="n">plot</span><span class="p">([</span><span class="n">X</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">4</span><span class="p">],</span> <span class="n">X</span><span class="p">[</span><span class="n">idx_right</span><span class="o">+</span><span class="mi">4</span><span class="p">]],</span>
+          <span class="p">[</span><span class="n">Y</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">4</span><span class="p">],</span> <span class="n">Y</span><span class="p">[</span><span class="n">idx_right</span><span class="o">+</span><span class="mi">4</span><span class="p">]],</span>
+          <span class="p">[</span><span class="n">Z</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">4</span><span class="p">],</span> <span class="n">Z</span><span class="p">[</span><span class="n">idx_right</span><span class="o">+</span><span class="mi">4</span><span class="p">]],</span> <span class="n">color</span> <span class="o">=</span> <span class="s">'k'</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+  <span class="n">ax</span><span class="p">.</span><span class="n">plot</span><span class="p">([</span><span class="n">X</span><span class="p">[</span><span class="n">idx</span><span class="p">],</span> <span class="n">X</span><span class="p">[</span><span class="n">idx_right</span><span class="o">+</span><span class="mi">3</span><span class="p">]],</span>
+          <span class="p">[</span><span class="n">Y</span><span class="p">[</span><span class="n">idx</span><span class="p">],</span> <span class="n">Y</span><span class="p">[</span><span class="n">idx_right</span><span class="o">+</span><span class="mi">3</span><span class="p">]],</span>
+          <span class="p">[</span><span class="n">Z</span><span class="p">[</span><span class="n">idx</span><span class="p">],</span> <span class="n">Z</span><span class="p">[</span><span class="n">idx_right</span><span class="o">+</span><span class="mi">3</span><span class="p">]],</span> <span class="n">color</span> <span class="o">=</span> <span class="s">'k'</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span></code></pre></figure>
+
+<p><img src="/images/3d_convexhull.png" alt="3d_convexhull" width="400" class="center" /></p>
+
+<h2 id="reproducing-the-first-plot"><span style="color:#C0392B">Reproducing the First Plot</span></h2>
+
+<p><img src="/images/first_plot.png" alt="firstplot" width="400" class="center" /></p>
+
+<p>We’re going to start with the first plot of Figure 1. This plot is</p>
+
+<h1 id="disclaimers"><span style="color:#C0392B">Disclaimers</span></h1>
+
+<p>…</p>
+
+<h1 id="sources"><span style="color:#2874A6">Sources</span></h1>
+
+<p>Randall Balestriero and Jerome Pesenti and Yann LeCun (2021).
+    <a href="https://arxiv.org/pdf/2110.09485.pdf" target="_blank"><em>Learning in High Dimension Always Amounts to Extrapolation</em></a></p>
+:ET
