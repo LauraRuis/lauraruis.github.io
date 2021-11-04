@@ -11,7 +11,7 @@ that a new sample lies in the convex hull of N other samples." class="center"/>
 
 In this post I'll attempt to shed some light on the conclusion that is drawn (in part[^1]) from the above image:
 
-*We shouldn't use interpolation/extrapolation when talking about generalization, because for high dimensional data deep learning models are
+*We shouldn't use interpolation/extrapolation in the way the terms are defined below when talking about generalization, because for high dimensional data deep learning models are
 always extrapolating, regardless of the dimension of the underlying data manifold.*
 
 The image is taken from 
@@ -51,9 +51,10 @@ At the end this post, we will hopefully know more about the following terms:
 The key idea in this paper is that we shouldn't be using interpolation and extrapolation (in the way the terms are defined in
  this paper) as indicators
 of generalization performance, because models are likely extrapolating. It doesn't matter what the intrinsic dimension
-of the data manifold is, which may be much lower than the dimensionality of our data representation. The authors ask 
-researchers that equate generalization with extrapolation develop appropriate geometrical definitions of extrapolation 
-that actually align with generalization in the context of high dimensional data. So let's dive in!
+of the data manifold is, which may be much lower than the dimensionality of our data representation.
+The authors think researchers that equate generalization with extrapolation should develop appropriate geometrical 
+definitions of extrapolation that actually align with generalization in the context of high dimensional data.
+So let's dive in!
 
 # <span style="color:#C0392B">When are we interpolating?</span>
 > **_In this section:_**  Interpolation, Extrapolation, Convex Hull, Convex Combination, Affine Combination, Curse of Dimensionality
@@ -244,11 +245,11 @@ The authors of the paper use a Monte-Carlo estimate. For each of the six plots a
 point on the line. Sample $$N$$ points from a Gaussian with
 dimension $$d$$ to form a training set of samples: $$\mathbf{x}_1, \dots, \mathbf{x}_{N}$$.
  Then, sample a new point $$\mathbf{x} \sim \mathcal{N}(0, \mathbb{I}_d)$$
-and determine whether it lies in the convex hull of the training set. Repeat this whole thing 500.000 times, giving 500.000 binary
+and determine whether it lies in the convex hull of the training set. Repeat this whole thing 500,000 times, giving 500,000 binary
 decisions whether the sample was inside the hull or not. The average of this gives the Monte-Carlo estimate of the probability that a new sample lies
 in the convex hull of the training set -- a single point on the plot. To get the
  entire plot we need to do this for $$N$$ between 1 and $$10^3 = 1000$$ for every $$d$$. You can imagine that this
- will take a while, so we will cheat the estimate slightly and only sample the convex hull once for every of the 500.000 trials
+ will take a while, so we will cheat the estimate slightly and only sample the convex hull once for every of the 500,000 trials
  we do per value for $$N$$. Additionally, we only take $$10$$ different values for $$N$$ for each $$d$$.
  
 Below, we'll implement everything to do this. We are going to need a few functions:
@@ -343,7 +344,7 @@ print("Probability inside hull (batch method): ",
 ```
 
 Now we are ready to reproduce the first plot. We sample $$N$$ points for an ambient dimension $$d$$ from a multivariate 
-Gaussian $$\mathcal{N}(\mathbf{0}, \mathbb{I}_d)$$. These points form the convex hull. Then we sample 500000 new points (`num_trials`) 
+Gaussian $$\mathcal{N}(\mathbf{0}, \mathbb{I}_d)$$. These points form the convex hull. Then we sample 500,000 new points (`num_trials`) 
 from the same Gaussian, and see whether they fall within the hull, or outside, to estimate the probability of being inside the convex hull.
 
 We do this for different $$N$$ per dimensions $$d \in \{2, \dots, 7\}$$. The N below (in `num_convex_hull_samples_per_dim`) 
@@ -696,7 +697,7 @@ We're ready to reproduce the figure. We take the following steps to do so:
 5. Repeat `num_trials` times.
 
 **CAVEAT**: The code below is *incredibly* slow, because of the new method of finding whether a point is in the convex hull used; 
-framing it as a QP problem. The paper does 500000 trials, but below we do just 100, to be a bit faster (runs in a few minutes).
+framing it as a QP problem. The paper does 500,000 trials, but below we do just 100, to be a bit faster (runs in a few minutes).
  It still works, but obviously the estimate is much worse.
 
 
@@ -763,7 +764,7 @@ for increasing d you need exponentially more N to keep increasing the probabilit
 the right has much more points per d." width="800" class="center"/>
 
 We can see that even though we cheated by only sampling the data points once per ambient dimension, and
-only doing 100 Monte-Carlo trials instead of 500000, we get away with it!
+only doing 100 Monte-Carlo trials instead of 500,000, we get away with it!
 
 ## <span style="color:#C0392B">Reproducing the Final Plot</span>
 > **_In this section:_**  Convex Hull Dimension
@@ -950,7 +951,7 @@ interpolation regime becomes exponentially difficult with respect to the conside
 methods almost surely operate in an extrapolation regime in both the data and their embedding space.
 Now of course, like the authors of this paper also acknowledge, this doesn't mean
 that deep learning methods are perfect. What definition for interpolation/extrapolation should we then take if we are
-talking about the relation to generalization performance? <a href="https://twitter.com/fchollet/status/1450524400227287040" target="_blank">Here</a> is
+talking about the relation to generalization performance? Perhaps <a href="https://twitter.com/fchollet/status/1450524400227287040" target="_blank">here</a> there's
 one answer from another researcher. I would be interested to see more.
 
 # <span style="color:#C0392B">Disclaimers</span>
@@ -973,6 +974,8 @@ take the following steps:
 6. ???
 7. Profit
 
+Additionally, I'm grateful for comments from Randall Balestriero, Robert Kirk, and Aryaman Fasciati.
+
 # <span style="color:#2874A6">Sources</span>
 
 Randall Balestriero and Jerome Pesenti and Yann LeCun (2021).
@@ -985,5 +988,3 @@ Barany, I. and Furedi, Z. (1988).
 [^2]: Jippie means "Yippie" in Dutch.
 [^3]: You could also <a href="https://math.stackexchange.com/questions/1511112/test-if-point-is-in-convex-hull-of-n-points" target="_blank">frame it as a linear programming problem.</a>
 
-# Todo's
-- Clean code and put on github and add link
