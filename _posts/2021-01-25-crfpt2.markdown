@@ -8,7 +8,7 @@ usemathjax: true
 
 In this part of the series of posts on structured prediction with conditional random fields (CRFs) we are going to implement all the ingredients
 that were discussed in [part 1]({% post_url 2021-01-25-crfpt1 %}). Recall that we discussed how to model
-the dependencies among labels in sequence prediction tasks with a linear-chain CRF. Now, we will put a such a CRF
+the dependencies among labels in sequence prediction tasks with a linear-chain CRF. Now, we will put a CRF
 on top of a neural network feature extractor and use it for
 part-of-speech (POS) tagging. 
 
