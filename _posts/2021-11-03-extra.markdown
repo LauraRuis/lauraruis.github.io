@@ -974,7 +974,7 @@ take the following steps:
 6. ???
 7. Profit
 
-Additionally, I'm grateful for comments from Randall Balestriero, Robert Kirk, and Aryaman Fasciati.
+Additionally, I'm grateful for comments from Randall Balestriero and Robert Kirk.
 
 # <span style="color:#2874A6">Sources</span>
 
