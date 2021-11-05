@@ -938,7 +938,7 @@ for increasing d if you keep d* the same you don't need exponentially more N to 
 the right has much more points per d." width="700" class="center"/>
 
 And we're done! If it's also a thorn in your eye that the colors of these plots don't match, go check out 
-<a href="todo: insert github link" target="_blank">the code</a> for
+<a href="https://github.com/LauraRuis/lauraruis.github.io/blob/master/notebooks/highd.ipynb" target="_blank">the code</a> for
 this blogpost for yourself and change it! 
 
 ## <span style="color:#C0392B">Final Ponderings</span>
