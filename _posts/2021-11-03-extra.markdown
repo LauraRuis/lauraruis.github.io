@@ -116,6 +116,9 @@ Now let's see what happens if we move to three dimensions. We'll stretch out the
 calculate the probability of lying within this cube.
 
 {% highlight python %}
+fig = plt.figure()
+ax = plt.axes(projection='3d')
+
 # Make the cube of 3D hull points (8 points, each is a corner of the cube).
 X = np.array([1, 2, 2, 1, 1, 2, 2, 1])
 Y = np.array([1, 1, 2, 2, 1, 1, 2, 2])
