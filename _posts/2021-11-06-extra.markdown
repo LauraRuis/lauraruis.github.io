@@ -7,7 +7,7 @@ date:   2021-11-06 10:09:17 -0500
 ---
 <script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
 
-<img src="/images/figure1.png" alt="An image of three plots, each of which is a stack of multiple plots for different d. Showing MC estimates of the probability
+<img src="/images/figure_1_croc.png" alt="An image of three plots, each of which is a stack of multiple plots for different d. Showing MC estimates of the probability
 that a new sample lies in the convex hull of N other samples." class="center"/>
 
 In this post I'll attempt to shed some light on the conclusion that is drawn (in part[^1]) from the above image:
