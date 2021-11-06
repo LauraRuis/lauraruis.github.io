@@ -12,8 +12,9 @@ that a new sample lies in the convex hull of N other samples." class="center"/>
 
 In this post I'll attempt to shed some light on the conclusion that is drawn (in part[^1]) from the above image:
 
-*We shouldn't use interpolation/extrapolation in the way the terms are defined below when talking about generalization, because for high dimensional data deep learning models are
-always extrapolating, regardless of the dimension of the underlying data manifold.*
+*We shouldn't use interpolation/extrapolation in the way the terms are defined below when talking about generalization, 
+because for high dimensional data deep learning models always have to extrapolate, regardless of the dimension of the 
+underlying data manifold.*
 
 The image is taken from 
 <a href="https://arxiv.org/pdf/2110.09485.pdf" target="_blank">Balestriero, Pesenti, and LeCun, 2021</a> and the goal of
@@ -51,8 +52,9 @@ At the end this post, we will hopefully know more about the following terms:
 ## <span style="color:#C0392B">The Key Idea</span>
 The key idea in this paper is that we shouldn't be using interpolation and extrapolation (in the way the terms are defined in
  this paper) as indicators
-of generalization performance, because models are likely extrapolating. It doesn't matter what the intrinsic dimension
-of the data manifold is, which may be much lower than the dimensionality of our data representation.
+of generalization performance, because models are likely extrapolating. That is true even for data manifolds with 
+moderate intrinsic dimensions. What counts is the dimensionality of the data representation, which is often much higher 
+than the intrinsic dimension.
 The authors think researchers that equate generalization with extrapolation should develop appropriate geometrical 
 definitions of extrapolation that actually align with generalization in the context of high dimensional data.
 So let's dive in!
@@ -103,14 +105,14 @@ for simplex in hull.simplices:
 <img src="/images/2d_convexhull.png" alt="A plot in R2 of 4 points forming a box, one point in the box, and one point outside." width="400" class="center"/>
 
 Everything within (or on) this square is a convex combination of the convex hull of the four samples, everything outside
-it but still in $$\mathbb{R}^2$$ is an *linear combination* of the samples, relaxing the constraints on the $$\lambda_i$$'s. Note that we can easily
+it but still in $$\mathbb{R}^2$$ is a *linear combination* of the samples, relaxing the constraints on the $$\lambda_i$$'s. Note that we can easily
 calculate the probability of lying within the convex hull of samples here if we assume that all values will lie between zero
 and three. Let's say we sample points uniformly between zero and three for both dimensions, then the probability that a new 
 sample lies within the convex hull of the four 'training' samples is the area of the convex hull divided by the total area:
 
 $$p(\mathbf{x} \in \text{Hull}(\mathbf{X})) = \frac{1}{9}$$
 
-In general, for a convex hull with area $$c$$ in $$\mathbb{R}^2$$ and data points between $$[x_0, x_1]$$ the probability of 
+In general, for a convex hull with area $$c$$ in $$\mathbb{R}^2$$ and data points in $$[x_0, x_1]$$ the probability of 
 lying in the convex hull of the four training samples is $$\frac{c}{(x_1 - x_0)^2}$$.  
 
 Now let's see what happens if we move to three dimensions. We'll stretch out the square from above into a cube and
@@ -188,7 +190,7 @@ This cube has a volume of one, and the probability of lying within this cube has
 
 $$p(\mathbf{x} \in \text{Hull}(\mathbf{X})) = \frac{1}{27}$$
 
-In general, for a convex hull with volume $$c$$ in $$\mathbb{R}^3$$ and data points between $$[x_0, x_1]$$ the probability of
+In general, for a convex hull with volume $$c$$ in $$\mathbb{R}^3$$ and data points in $$[x_0, x_1]$$ the probability of
 lying in the convex hull is $$\frac{c}{(x_1 - x_0)^3}$$. This provides some intuition as to why the probability of 
 lying within the convex hull (i.e., being in interpolation regime) quickly goes down as the dimensionality of the problem goes up -- exponentially quickly.
 
@@ -329,8 +331,7 @@ def probability_in_convex_hull_batch(new_samples: np.array,
 {% endhighlight %}
 
 Let's see if it works for the convex hull we visualized above in $$\mathbb{R}^2$$. In addition to the point inside and the point outside the hull
- above, let's add two more points outside the hull to get a probability of being inside the hull of $$\frac{1}{4}$$ (ofcourse
- a probability doesn't make a lot of sense here since there is no randomness involved).
+ above, let's add two more points outside the hull to get a quarter of the points inside the hull.
 
 {% highlight python %}
 point_in_hull = np.array([1.3, 1.8])
@@ -474,11 +475,11 @@ for increasing d you need exponentially more N to keep increasing the probabilit
 This plot looks incredibly similar to the first one. The difference lies in the underlying data manifold
 that is sampled from, i.e. the *intrinsic dimension* (denoted by $$\bar{d}$$) will be different. For the first plot, we sampled from a $$d$$-dimensional Gaussian. 
 The intrinsic dimension of this Gaussian was the same as the dimension we used to represent it: $$d = \bar{d}$$.
- For this plot, we will sample from a $$1$$-dimensional nonlinear continuous manifold ($$\bar{d} = 1$$), but represent that data in a higher
- dimension ($$d = \{2, \dots, 7\}$$). The point of the plot is to show that even for data with a 1-dimensional manifold, if the ambient dimension
+ For this plot, we sample 1-dimensional data and represent it in a higher dimension ($$d \in \{2, \ldots, 7\}$$). 
+ In each case the representation takes the form of a nonlinear differentiable manifold ($$\bar{d} = 1$$). The point of the plot is to show that even for data with a 1-dimensional manifold, if the ambient dimension
  goes up, you will still need exponentially more data to stay in interpolation regime with a high probability.
 
-So how are we going to get data from a nonlinear continuous 1-dimensional data manifold and represent it in a higher dimension $$d$$?
+So how are we going to sample from a nonlinear differentiable 1-dimensional data manifold with a higher dimension $$d$$?
 We'll take the following steps.
 
 - Sample $$d$$ independent Gaussian points.
@@ -490,8 +491,9 @@ These samples are now taken from a spline $$f: \mathbb{R} \rightarrow \mathbb{R}
 
 **Why would this work?**
 
-This works because the chances of sampling a point from a Gaussian that's overlapping with a previous point is zero,
-so with every point that we sample we increase the dimensionality the spline moves through. Let's implement it below.
+This works because $$d$$ independent samples will almost surely span all of $$\mathbb{R}^d$$, 
+so that the dimension of the samples and, hence, the resulting spline is $$d$$.
+
 
 {% highlight python %}
 def construct_one_dimensional_manifold(ambient_dimension: int):
@@ -512,8 +514,8 @@ def sample_from_one_dimensional_manifold(manifold_func, num_samples):
   return manifold_func(np.random.uniform(low=0, high=1, size=num_samples))
 {% endhighlight %}
 
-Now we can sample from 1-dimensional manifolds and represent it in any ambient dimension. We can't visualize dimensions
-above 3, but we can show what the manifold looks like in 2D. Below let's sample from the manifold, and represent it in
+Now we can sample from 1-dimensional manifolds in any ambient dimension. We can't visualize dimensions
+above 3, but we can look at the first two components of the spline. Below let's sample from the manifold in
 2 and 10 dimensions.
 
 {% highlight python %}
@@ -535,7 +537,7 @@ that has ambient dimension 2; both have intrinsic dimension 1.
 # <span style="color:#C0392B">Does it lie in the convex hull? A QP problem</span>
 
 Unfortunately, the batched method for finding out whether a new point lies inside the convex hull doesn't work anymore. 
-This is because the fact that our samples all come from a 1D manifold causes geometric degeneracy. From the SciPy docs:
+This is because our samples all come from a 1D manifold, which causes geometric degeneracy. From the SciPy docs:
 
 ```console
 QhullError 
@@ -611,7 +613,7 @@ b = \begin{pmatrix}
 \end{pmatrix}
 $$
 
-This ensures that the sum of the $$\lambda_i$$ equals 1 and all entries are above non-negative.
+This ensures that the sum of the $$\lambda_i$$ equals 1 and all entries are non-negative.
 
 Below we implement this, and we assume a new vector is in the complex hull if the QP problem has a 'loss' smaller than 1e-5 
 (meaning $$\left(\mathbf{X}^T\boldsymbol{\lambda} - \mathbf{x}\right)^T \left(\mathbf{X}^T\boldsymbol{\lambda} - \mathbf{x}\right) \leq 1e-5$$).
@@ -696,7 +698,7 @@ print("Probability inside hull (quadratic programming method): ",
 
 We're ready to reproduce the figure. We take the following steps to do so:
 
-1. Sample a spline for a dimension $$d = \{2, \dots, 7\}$$.
+1. Sample a spline for a dimension $$d \in \{2, \ldots, 7\}$$.
 2. Get $$N$$ convex hull samples from this same spline.
 3. Get a new sample from the spline.
 4. See whether it's in the convex hull of the $$N$$ samples by solving the quadratic programming problem.
@@ -781,7 +783,7 @@ for increasing d if you keep d* the same you don't need exponentially more N to 
 The final plot requires the introduction of some new terminology; it's the plot that answers the question: 
 "so how can we control the probability of interpolating, i.e. of a new sample lying in the convex hull"? 
 The answer is (somewhat unsurprisingly now); by keeping the *dimensions of the convex
-hull* the same. The convex hull dimension, also referred to as the dimension of the lowest dimensional affine
+hull* fixed. The convex hull dimension, also referred to as the dimension of the lowest dimensional affine
 subspace including the entire data manifold in the paper, is the dimension of the convex hull of the data points.
 Recall the discussion of what the convex hull is above? Below on the left we take two of those datapoints, that happen
 to lie on a line in $$\mathbb{R}^3$$, so the ambient dimension is 3, but the convex hull dimension is 1; it's a line.
@@ -795,7 +797,7 @@ one with a plane square between 4 points, and one with a cube between 8 points."
 Now what we do to reproduce the final plot, is show that if we keep the convex hull dimension $$d^*$$ similar,
 but increase the ambient dimension, it doesn't have the effect it had before anymore! We don't need more datapoints $$N$$
 to keep the probability of a new sample lying in the convex hull at 50% for a higher ambient dimension. The paper uses a
-convex hull dimension of $$d^* = 4$$ and ambient dimensions of $$d = \{5, 6, 7\}$$
+convex hull dimension of $$d^* = 4$$ and ambient dimensions of $$d \in \{5, 6, 7\}$$
 
 **How to control the convex hull dimension, while increasing the ambient dimension?**
 
@@ -803,12 +805,11 @@ We'll use the same intuition about Gaussians as before. To get 4-dimensional
 data we sample 4 independent Gaussian data points, these points will very likely have a convex hull dimension of 4.
 To see why, imagine the 3D plots from above. If we sample two data points in this 3D space, we can get at most a convex 
 hull dimension of 1 (a line), then if we sample another point and it happens to be an extension of this line,
- the convex hull dimension won't increase, it'll still be a line. The chances of this happening are incredibly low in 3D;
- likely the dimension will increase to 2, a plane. Then if you sample another point, the chances of this one being an 
- extension of the plane are again low. If you move this intuition to higher dimensions, 
- the probability of sampling a new point from a Gaussian that lies on the convex hull you already spanned so far is even 
- lower than a line or plane in 3D space, so you can be quite sure that the convex hull will have the same dimension as 
- the number of Gaussian data points you sample.
+ the convex hull dimension won't increase, it'll still be a line. The chances of this happening are zero, so the
+  dimension will increase to 2, a plane. Then if you sample another point, it will again not be an extension of the plane.
+   If we generalise this intuition to higher dimensions, we obtain that the probability of sampling a new point from a 
+   Gaussian that lies on the convex hull is zero (whenever the dimension of the convex hull is small than the dimension 
+   of the ambient space).
 
 To increase the ambient dimension without increasing the convex hull dimension, we can simply multiply the data points 
 of a lower dimension with an invertible matrix of the desired dimension. This way we won't increase the convex hull 
@@ -821,8 +822,7 @@ For example, we have $$N$$ samples from the 4D Gaussian $$\mathbf{X} \in \mathbb
  giving us the final samples $$\mathbf{X}^{\star} \in \mathbb{R}^{N \times 7}$$ (with $$rank(\mathbf{X}^{\star}) = rank(\hat{\mathbf{X}}\mathbf{A}) = \min(rank(\hat{\mathbf{X}}), rank(\mathbf{A})) = 4$$).
 
 To get a random invertible matrix of $$d\times d$$ we just sample $$d$$ times from a $$d$$-dimensional Gaussian again, 
-which roughly guarantees to give an invertible matrix (with the same intuition as above; it's unlikely you'll sample a 
-linearly dependent point). Let's implement it!
+which guarantees to give an invertible matrix (with the same intuition as above). Let's implement it!
 
 
 {% highlight python %}
@@ -946,7 +946,7 @@ this blogpost for yourself and change it!
 
 ## <span style="color:#C0392B">Final Ponderings</span>
 
-What we learned now is that *no matter the underlying intrinsic dimension of your data manifold*, for increasing convex hull
+What we learned now that *no matter what the intrinsic dimension of your underlying data manifold is*, for increasing convex hull
 dimensions we need exponentially more data to have any chance of being in interpolation regime. Now at this point, that
 doesn't sound too surprising anymore, since we defined interpolation regime as the convex hull. But that's precisely
 what this paper has achieved, it illuminated some of the terms that were previously undefined in the debate, and made them unsurprising. 
