@@ -1050,7 +1050,7 @@ We return the scores and the sequences without the root and we are done!
 We've implemented all the methods needed for a bi-LSTM-CRF POS tagger! We've taken care of batched forward belief propagation and
 calculating the nominator, together forming our loss function. Then we implemented Viterbi decoding to find the predicted
 tag sequence with maximum probability. Now, we only need to get some data and train our model on it.
-Go to [part three]({% post_url 2021-01-25-crfpt3 %}) to train this model on real POS tagging data!
+Go to [part three]({% post_url 2021-11-06-crfpt3 %}) to train this model on real POS tagging data!
 
 # <span style="color:#2874A6">Sources</span>
     
