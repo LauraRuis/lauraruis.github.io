@@ -807,7 +807,7 @@ To see why, imagine the 3D plots from above. If we sample two data points in thi
 hull dimension of 1 (a line), then if we sample another point and it happens to be an extension of this line,
  the convex hull dimension won't increase, it'll still be a line. The chances of this happening are zero, so the
   dimension will increase to 2, a plane. Then if you sample another point, it will again not be an extension of the plane.
-   If we generalise this intuition to higher dimensions, we obtain that the probability of sampling a new point from a 
+   If we generalize this intuition to higher dimensions, we obtain that the probability of sampling a new point from a 
    Gaussian that lies on the convex hull is zero (whenever the dimension of the convex hull is small than the dimension 
    of the ambient space).
 
