@@ -3,6 +3,7 @@ layout: post
 title:  "Learning in High Dimensions Always Amounts to Extrapolation"
 usemathjax: true
 hidden: true
+date:   2021-11-06 10:09:17 -0500
 ---
 <script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
 
@@ -57,7 +58,7 @@ definitions of extrapolation that actually align with generalization in the cont
 So let's dive in!
 
 # <span style="color:#C0392B">When are we interpolating?</span>
-> **_In this section:_**  Interpolation, Extrapolation, Convex Hull, Convex Combination, Affine Combination, Curse of Dimensionality
+> **_In this section:_**  Interpolation, Extrapolation, Convex Hull, Convex Combination, Linear Combination, Curse of Dimensionality
 
 
 The definition of interpolation in the paper is the following:
@@ -102,7 +103,7 @@ for simplex in hull.simplices:
 <img src="/images/2d_convexhull.png" alt="A plot in R2 of 4 points forming a box, one point in the box, and one point outside." width="400" class="center"/>
 
 Everything within (or on) this square is a convex combination of the convex hull of the four samples, everything outside
-it but still in $$\mathbb{R}^2$$ is an *affine combination* of the samples, relaxing the constraints on the $$\lambda_i$$'s. Note that we can easily
+it but still in $$\mathbb{R}^2$$ is an *linear combination* of the samples, relaxing the constraints on the $$\lambda_i$$'s. Note that we can easily
 calculate the probability of lying within the convex hull of samples here if we assume that all values will lie between zero
 and three. Let's say we sample points uniformly between zero and three for both dimensions, then the probability that a new 
 sample lies within the convex hull of the four 'training' samples is the area of the convex hull divided by the total area:
@@ -135,9 +136,9 @@ def convex_combination(points):
   lambdas_n = lambdas / np.sum(lambdas)
   return np.dot(points.transpose([1, 0]), lambdas_n)
 
-# A function to get an affine combination of a set of points 
+# A function to get an linear combination of a set of points 
 # that is *not* a convex combination.
-def affine_combination(points):
+def linear_combination(points):
   lambdas = np.random.randint(0, 10, len(points))
   lambdas_n = lambdas / np.sum(lambdas)
   offset = np.random.choice([np.random.uniform(-0.1, -0.02),
@@ -155,14 +156,14 @@ for i in range(10):
   new_point = convex_combination(points)
   ax.scatter(*new_point, c='lightgreen', zorder=2.5)
 
-# Plot some affine combinations of the hull data points.
+# Plot some linear combinations of the hull data points.
 for i in range(10):
   num_points = np.random.randint(5, 8, 1)
   point_indices = np.random.randint(0, 8, num_points)
   points = np.array([X[point_indices], 
                      Y[point_indices], 
                      Z[point_indices]]).transpose([1, 0])
-  new_point = affine_combination(points)
+  new_point = linear_combination(points)
   ax.scatter(*new_point, c='tomato', zorder=12.5)
 
 # Plot the box around the convex hull.
