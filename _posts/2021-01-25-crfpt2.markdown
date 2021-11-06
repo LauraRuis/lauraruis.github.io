@@ -87,7 +87,7 @@ index 0 for the special token `<PAD>`, which we need later when we will batch ou
 of different length $$m$$. 
 
 Strictly speaking btw, our bi-LSTM does not take $$\mathbf{x}$$ as input but $$\mathbf{E}_{x_t*}$$, where
-$$\mathbf{E}$$ is the matrix of embedding parameters of size $$|S| \times d_e$$. So if $$x_t = 3$$ (index 3 in our vocabulary, which might
+$$\mathbf{E}$$ is the matrix of embedding parameters of size $$|I| \times d_e$$ (where $$I$$ is the input vocabulary size, or the number of unique input words). So if $$x_t = 3$$ (index 3 in our vocabulary, which might
 be mapping to *book* for example), $$\mathbf{E}_{x_t*}$$ takes out the corresponding embedding of size $$d_e$$.
 
 {% highlight python %}
