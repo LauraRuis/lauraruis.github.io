@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "Learning in High Dimensions Always Amounts to Extrapolation"
+title:  "Learning in High Dimension Always Amounts to Extrapolation"
 usemathjax: true
 hidden: true
 date:   2021-11-06 10:09:17 -0500
@@ -37,7 +37,7 @@ going on in this discussion in his *"an enquiry concerning human understanding"*
 Basically, it seems like a lot of arguments between people are a result of not properly defining what is discussed (and the
 last author on this paper <a href="https://twitter.com/ylecun/status/1450809828268548101" target="_blank">probably agrees</a>). 
 I never read Hume, but adding a fancy philosopher quote is a necessary step towards creating the illusion that I know 
-what I'm talking about. In reality, the reason I'm writing this blogpost is because I didn't understand the Learning in High Dimensions
+what I'm talking about. In reality, the reason I'm writing this blogpost is because I didn't understand the Learning in High Dimension
 paper at all on first reading. With this post I hope to get a better understanding of it, and share that understanding.
 
 At the end this post, we will hopefully know more about the following terms:
