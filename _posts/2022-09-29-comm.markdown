@@ -1,0 +1,182 @@
+---
+layout: post
+title:  "Large language models are not zero-shot communicators"
+usemathjax: true
+hidden: true
+date:   2022-09-29 10:09:17 -0500
+---
+<script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+
+<span style="color:#C0392B">TL;DR</span>. Large language models can make big improvements in communication skills if we shift focus from syntax and semantics to pragmatic language understanding.
+{: style="color:black; font-size: 100%; text-align: left;"}
+
+<span style="color:#C0392B">Paper</span>. TODO
+
+<span style="color:#C0392B">Code</span>. <a href="https://github.com/LauraRuis/do_pigs_fly" target="_blank">GitHub</a>
+
+<span style="color:#C0392B">Dataset</span>. <a href="https://huggingface.co/datasets/UCL-DARK/ludwig" target="_blank">Uploaded with prompt templates on HuggingFace</a>
+
+---
+
+## <span style="color:#C0392B">Introduction</span>
+
+<img src="/images/accuracy_v_size_k=0.png" alt="An image showing a scaling line plot with accuracy on the y-axis and log model size on the x-axis.
+The image shows multiple lines, each representing a model like InstructGPT, the show a logarithmically increasing line from about 55% accuracy for the worst model
+to 72% accuracy for the best model. The plot also shows human performance as a horizontal line at 86% accuracy." width="600" class="center"/>
+
+At this point you don't know what the above plot means yet, but you can see it shows scaling lines for a bunch of large language models (LLMs). It is the main result in the paper that this blogpost is about.
+Spoiler alert; the green line leaving all other models far behind is one of the instructable models we tested; OpenAI's 001 series. We still wouldn't
+say it is a zero-shot communicator though when compared to the average human. Let's elaborate.
+
+<a href="TODO: arxiv link" target="_blank">In this paper</a> we essentially motivate the statement that large language models are not zero-shot communicators -- the title of the paper. But what do we mean when
+we say "communicators"? What about the fact that one LLM recently beautifully <a href="https://www.washingtonpost.com/technology/2022/06/11/google-ai-lamda-blake-lemoine/" target="_blank">passed (a variation of) the Turing test</a>? Surely they can
+converse with humans? 
+In this post I'll go into all this and in doing that, will summarise the paper's main results. Let's start with the main message of the paper.
+
+### <span style="color:#C0392B">Main message</span>
+
+**Main result**. Pragmatic language understanding is key to communicating with humans and all large language models we tested currently fail
+even the simplest test we could come up with.
+
+**Finding**. A promising path forward seems to be instruction-finetuning; these models perform significantly better
+than all others zero-shot, and can be prompted with in-context examples to get close-to-human performance.
+
+**Finding**. However, even the best instructable model we tested leaves a significant gap with human performance on a subset of the data that
+requires context to be resolved, also in the few-shot case.
+
+**Future work**. There is ample room for improving the pragmatic understanding skills of LLMs. Since we test very simple utterances, future work leaves a lot of room for more complex tests of pragmatic understanding.
+
+**Takeaway**. We believe LLMs can make large improvements in communication skills if we shift focus from syntax and semantics to pragmatic language understanding.
+
+
+### <span style="color:#C0392B">Introducing the problem</span>
+
+> Human: Have you seen my phone? \\
+> InstructGPT: Yes, I have seen your phone.
+
+InstructGPT can understand the syntax and semantics of the question perfectly, produce a high-likelihood response,
+and still miss the meaning of the question entirely. Indeed, this question has the _intended_ meaning of inquiring about
+the whereabouts of the phone. Successful communication means the speaker's implications are understood by the addressee.
+
+### <span style="color:#C0392B">Defining communication</span>
+Communication, then, is a collaborative effort where speakers try to convey meaning to each other. A "communicator" can successfully
+infer the hidden implications in conversation by tapping into their own belief systems, the speaker's belief system, common history, commonsense knowledge, and more.
+All these things people use to infer meaning can be grouped under the
+term **context** (not to be confused with the literal semantic context around an utterance).
+This goes beyond the syntax,
+semantics, and compositional meaning of utterances, and is separately studied by the field of pragmatics.
+
+### <span style="color:#C0392B">Pragmatics</span>
+The distinction between communication and fluent text generation is pragmatic language understanding[^1]. We believe the next 
+big step towards improving the experience of using language models as conversational agents is improving their understanding of
+language as a collaborative, communicative effort. The everyday language of humans is riddled with hidden meaning determined by
+all kinds of context, almost every conversation will contain examples of it. Consider again an exchange, taken from the dataset used in this paper:
+
+> Esther: Did you leave fingerprints? \\
+> Juan: I wore gloves.
+
+This example uses context from the physical world that we cannot leave fingerprints when wearing gloves. Without knowing this,
+the response is seemingly arbitrary. 
+
+To see a more in-depth introduction of pragmatics refer to Appendix B of <a href="TODO: arxiv link" target="_blank">our paper</a>.
+Also, check out <a href="https://www.deepmind.com/blog/in-conversation-with-ai-building-better-language-models" target="_blank">concurrent theoretical work</a> by DeepMind researchers emphasising the importance of pragmatic language understanding for value alignment. 
+
+## <span style="color:#C0392B">Evaluating Large Language Models</span>
+
+Language models can be very impressive and fluent, even convincing people that there is a conscious being in the machine, but
+what we argue is the missing ingredient to make them useful as conversational systems is the pragmatic understanding of language that humans intuitively have.
+
+### <span style="color:#C0392B">Evaluating pragmatic language understanding</span>
+
+Consider another example of pragmatic language:
+
+> Esther: Want to stay for a nightcap? \\
+> Juan: I've gotta get up early.
+
+The meaning of Juan's response is "no", and we call this an **implicature**. We use a dataset of conversational implicatures[^2] like these,
+all resolving to a simple "yes" or "no". We say a language model "understands" the implicature if it assigns a higher likelihood
+to the meaning of the response, in the above case "no". Schematically:
+
+<img src="/images/drawing_implicature_paper.drawio.png" alt="An image showing a diagram of how to wrap examples of implicature in the form
+of utterance, response, implicature tuples into a positive and negative textual example that can be evaluated by a language model. The language
+model is said to understand the implicature if it assigns a higher likelihood to the positive example than the negative example." width="700" class="center"/>
+
+We use a bunch of prompt templates (6 in total, 1 showing above) to accommodate LLMs known to be sensitive to prompt wording. Part of the dataset
+we separate into a development set and use for few-shot
+in-context prompting. The best performing models we further test with some instructing zero-shot prompts recently used by researchers at DeepMind for their model Sparrow [^3].
+For example:
+
+> The following text shows an interaction between two humans called Esther and Juan. \\
+In the interaction, Esther will ask Juan a question, and Juan will give an answer that has a meaning
+besides the literal meaning of the words. \\
+That meaning is either yes or no. \\
+You, a highly intelligent and knowledgeable AI assistant, are asked to finish the text with the
+correct meaning, either yes or no. \\
+The task begins:
+> 
+> Esther asked "Want to stay for a nightcap?" and Juan responded "I've gotta get up early", which means
+
+### <span style="color:#C0392B">Sneak-peak into the results</span>
+
+For all the results, check out <a href="TODO: arxiv link" target="_blank">the paper</a>, but here I'll summarise the main findings.
+We look at BERT, RoBERTa, GPT-2, EleutherAI, BlenderBot, BLOOM, OPT, Cohere, GPT-3, and OpenAI's instructable models.
+Random performance on the dataset is 50%, humans obtain on average 86.2% accuracy on the task, and the best humans obtained 89%.
+
+#### <span style="color:#C0392B">Zero-shot failures</span>
+All models except OpenAI's instructable models achieve between 53.4% (BlenderBot) and 61.5% (OPT) zero-shot accuracy on the task. 
+The best-performing instructable model of OpenAI is Davinci-001 and obtains 72%. This leaves a gap of 13.9% with human performance.
+
+For details see the paper: section 4.1, Figure 2 left, Table 1
+
+#### <span style="color:#C0392B">Instruction fine-tuning significantly outperforms all other models</span>
+The only models that obtain significantly better performance than random are the instructable models Davinci-001 and Davinci-002,
+respectively obtaining 72% and 70.6% accuracy. That is 8.5% better than the best non-intructable model. Might we be able to improve their zero-shot performance with better prompting?
+
+_For details see the paper_: section 4.1, Figure 2 left, Table 1
+
+#### <span style="color:#C0392B">Sparrow prompt does not help</span>
+If we try three extra zero-shot prompts for the models GPT-3, Davinci-001, and Davinci-002, we see this does not improve performance.
+
+_For details see the paper_: section 4.1, Table 3
+
+#### <span style="color:#C0392B">In-context prompting helps a lot</span>
+We use the original 6 prompt templates, but now add in-context examples. At $$k=30$$ we find that performance jumps to 80.6% for Davinci-002, and
+does not help much for the non-instructable models. This means Davinci-002 achieves near-human performance when prompted with in-context examples!
+
+_For details see the paper_: section 4.2, Figure 2 right, Figure 4
+
+#### <span style="color:#C0392B">But still a significant gap with humans on context-heavy examples</span>
+We manually labeled a part of the dataset according to a taxonomy that distinguishes context-free and context-heavy examples.
+An example of a context-free implicature is the following:
+
+> Esther: You know all these people? \\
+> Juan: Some.
+
+It is an implicature, because the hidden meaning is that Juan does not know **all** the people. However, we do not need context to resolve it,
+the implicature is resolved by the _conventional meaning of the word some_. The nightcap example used above in this post is an example of a context-heavy
+example, we need the contextual commonsense knowledge that having to work early the next morning usually means we do not want to go drinking
+the night before. 
+
+We find that humans obtain 83.2% accuracy on context-heavy examples and the best performing model obtains an accuracy of 59.7% zero-shot.
+This increases the performance gap to 23.5% with humans for the best performing model zero-shot. Again, in-context prompting helps a lot. However, at $$k=30$$ the gap on context-heavy examples
+is still 8.8% for the best performing model (Davinci-002).
+
+_For details see the paper_: section 4.1, section 4.2, Table 2, Figure 3
+
+## <span style="color:#C0392B">Conclusion</span>
+
+We evaluate a set of SOTA LLMs on a simple pragmatic language understanding test, and find that they struggle. We are excited about
+the prospects of large language models becoming "communicators" by improving their pragmatic language skills.
+
+### <span style="color:#C0392B">A note on open research</span>
+The sharp reader might wonder how I can use LaMDA's passing of a (variation of) the Turing test as a motivating example
+of LLMs abilities that we critique here without actually evaluating LaMDA. Well, we've tried to get access to LaMDA (and Chinchilla and PaLM),
+but to no avail. We invite the LaMDA authors and other researchers to further motivate the conversational abilities of their
+model by also evaluating on the implicature benchmark. If it indeed passes, it will provide us with another important datapoint that hints at what publicly available
+models need to improve!
+
+# <span style="color:#2874A6">Sources</span>
+
+[^1]: Nicely outlined by G.M. Green, 1996. in <a href="https://books.google.de/books?id=_ip9T4LONvkC" target="_blank">*Pragmatics and Natural Language Understanding.*</a>
+[^2]: The data was curated by Elizabeth Jasmi George and Radhika Mamidi, find the paper introducing it <a href="https://app.dimensions.ai/details/publication/pub.1128198497" target="_blank">here</a>.
+[^3]: Amelia Glaese et al, 2022. <a href="https://arxiv.org/pdf/2209.14375.pdf" target="_blank">*Improving alignment of dialogue agents via targeted human judgements*</a>
