@@ -48,7 +48,7 @@ Let's start with the main message of the paper.
 than all others zero-shot and can be prompted with in-context examples to get close-to-human performance.
 
 **Finding**. However, even the best instructable model we tested leaves a significant gap with human performance on a subset of the data that
-requires context to be resolved, also in the few-shot case.
+requires context to be resolved, even in the few-shot case.
 
 **Future work**. There is ample room for improving the pragmatic understanding skills of LLMs. Additionally, since we test very simple utterances, future work can design more complex tests of pragmatic understanding.
 
@@ -65,7 +65,7 @@ context; almost every conversation will contain examples of it. Consider again a
 This example uses the context from the physical world that we cannot leave fingerprints when wearing gloves. Without knowing this,
 the response is seemingly arbitrary. It is an example of an **implicature**: an utterance conveying something other than its literal meaning (in this case "no, I did not leave fingerprints.").
 
-<u>Communication is</u> a collaborative effort where speakers try to convey meaning to each other. A "communicator" can successfully
+<u>Communication is</u> a collaborative effort where speakers try to convey intentions to each other. A "communicator" can successfully
 infer the hidden implications in conversation by tapping into their own belief systems, the speaker's belief system, common history, commonsense knowledge, and more.
 All this can be grouped under the
 term **context**. The way we use the term here is not to be confused with the way its often used in NLP: the literal semantic context around an utterance. On the contrary, the type of context we are referring to here is generally not explicitly part of a conversation.
