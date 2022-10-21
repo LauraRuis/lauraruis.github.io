@@ -14,7 +14,7 @@ date:   2022-09-29 10:09:17 -0500
 
 <span style="color:#C0392B">Paper</span>. TODO
 
-<span style="color:#C0392B">Code</span>. <a href="https://github.com/LauraRuis/do_pigs_fly" target="_blank">GitHub</a>
+<span style="color:#C0392B">Code</span>. <a href="https://github.com/LauraRuis/do-pigs-fly" target="_blank">GitHub</a>
 
 <span style="color:#C0392B">Dataset</span>. <a href="https://huggingface.co/datasets/UCL-DARK/ludwig" target="_blank">Uploaded with prompt templates on HuggingFace</a>
 
