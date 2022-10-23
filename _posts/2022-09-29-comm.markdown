@@ -105,7 +105,7 @@ The task begins:
 ### <span style="color:#C0392B">Sneak-peak into the results</span>
 
 For all the results, check out <a href="TODO: arxiv link" target="_blank">the paper</a>. Here I'll briefly summarise the main findings.
-We look at BERT, RoBERTa, GPT-2, EleutherAI, BlenderBot, BLOOM, OPT, Cohere, GPT-3, and OpenAI's instructable models.
+We look at BERT, RoBERTa, GPT-2, EleutherAI, BlenderBot, BLOOM, OPT, Cohere, T0, GPT-3, and OpenAI's instructable models.
 Random performance on the dataset is 50% accuracy, humans obtain on average 86.2% accuracy, and the best humans obtained 89%.
 
 #### <span style="color:#C0392B">Zero-shot results</span>
