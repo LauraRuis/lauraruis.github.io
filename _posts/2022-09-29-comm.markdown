@@ -105,30 +105,33 @@ The task begins:
 ### <span style="color:#C0392B">Sneak-peak into the results</span>
 
 For all the results, check out <a href="TODO: arxiv link" target="_blank">the paper</a>. Here I'll briefly summarise the main findings.
-We look at BERT, RoBERTa, GPT-2, EleutherAI, BlenderBot, BLOOM, OPT, Cohere, T0, GPT-3, and OpenAI's instructable models.
+The set of large language model classes we evaluate can be grouped into four distinct categories: (1) base models (namely RoBERTa, BERT,
+GPT-2, GPT-3, OPT, BLOOM, and EleutherAI, (2) instructable LLMs finetuned with reinforcement learning (OpenAI's Davinci-001 and Davinci-002 of the class InstructGPT),
+(3) instructable LLMs finetuned on downstream tasks (T0 and Flan-T5), and (4) LLMs finetuned on dialogue (BlenderBot).
+Each group contains one or more model classes for which we evaluate a range of model sizes.
 Random performance on the dataset is 50% accuracy, humans obtain on average 86.2% accuracy, and the best humans obtained 89%.
 
 #### <span style="color:#C0392B">Zero-shot results</span>
 
 <img src="/images/accuracy_v_size_k=0.png" alt="An image showing a scaling line plot with accuracy on the y-axis and log model size on the x-axis. The image shows multiple lines, each representing a model like InstructGPT, the show a logarithmically increasing line from about 55% accuracy for the worst model to 72% accuracy for the best model. The plot also shows human performance as a horizontal line at 86% accuracy." width="600" class="center"/>
 
-OpenAI's instructable models are the best model classes we look at, with Davinci-001 obtaining 72% zero-shot accuracy. This leaves a gap of 13.9% with human performance. The best models of the other classes we look at achieve between 53.4% (BlenderBot) and 61.5% (OPT) zero-shot accuracy.
+OpenAI's instructable models are the best model classes we look at, with InstructGPT obtaining 72% zero-shot accuracy. This leaves a gap of 13.9% with human performance. The best models of the other classes we look at achieve between 53.4% (BlenderBot-2.7B) and  63.3% (Flan-T5-780M) zero-shot accuracy.
 
 _For details see the paper: section 4.1, Figure 2 left, Table 1_
 
 #### <span style="color:#C0392B">Instruction fine-tuning significantly outperforms all other models</span>
-The instructable models Davinci-001 and Davinci-002 obtain a significantly better performance than all other models,
-respectively obtaining 72% and 70.6% accuracy. This is 8.5% better than the best non-intructable model. Perhaps we can improve their zero-shot performance with better prompting?
+The instructable models InstructGPT and Davinci-002 obtain a significantly better performance than all other models,
+respectively obtaining 72% and 70.6% accuracy. This is 7.3% better than the best model of all other groups. Perhaps we can improve their zero-shot performance with better prompting?
 
 _For details see the paper: section 4.1, Figure 2 left, Table 1_
 
 #### <span style="color:#C0392B">Instruction prompts do not help</span>
-For the three OpenAI models (GPT-3, Davinci-001, and Davinci-002) we attempt the zero-shot experiment again, but now with more elaborate prompts containing detailed instructions. This does not improve performance.
+For the three OpenAI models (GPT-3, InstructGPT, and Davinci-002) we attempt the zero-shot experiment again, but now with more elaborate prompts containing detailed instructions. This does not improve performance.
 
 _For details see the paper: section 4.1, Table 3_
 
 #### <span style="color:#C0392B">In-context prompting helps a lot</span>
-We use the original 6 prompt templates, but now add in-context examples. At $$k=30$$ we find that performance jumps to 80.6% for Davinci-002, which is near-human performance! It does not help much for the non-instructable models.
+We use the original 6 prompt templates, but now add in-context examples. At $$k=30$$ we find that performance jumps to 80.6% for Davinci-002, which is near-human performance! It does not help much for the other models.
 
 _For details see the paper: section 4.2, Figure 2 right, Figure 4_
 
