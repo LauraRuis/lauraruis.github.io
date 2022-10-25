@@ -27,14 +27,14 @@ In <a href="TODO: arxiv link" target="_blank">our most recent paper</a>'s title 
 
 Consider the following exchange between a human and InstructGPT.
 
-> Human: Have you seen my keys? \\
-> InstructGPT: Yes, I have seen your keys.
+> User: "Have you seen my phone?" \\
+> InstructGPT: "Yes, I have seen your phone."
 
 InstructGPT can understand the syntax and semantics of the question perfectly, produce a high-likelihood response,
 and still miss the meaning of the question entirely. Language models can be impressively fluent, even fooling people into thinking they're conscious, but still miss an important aspect of language understanding.
 Indeed, this question has a _pragmatic_ implication; an inquiry about
-the location of a set of keys.
-Humans use commonsense knowledge like an experience of having lost their own keys in the past to infer that the speaker is probably looking for them instead of actually wanting a yes-no response.
+the location of a phone.
+Humans use commonsense knowledge like an experience of having lost their own phone in the past to infer that the speaker is probably looking for it instead of actually wanting a yes-no response.
 This example illustrates an essential and ubiquitous aspect of our every day usage of language: interpreting language given the context of our shared experience.
 In this work, we uncover a failure mode of LLMs when the task requires interpreting language in context.
 
@@ -56,7 +56,7 @@ requires context to be resolved, even in the few-shot case.
 
 ### <span style="color:#C0392B">Defining communication</span>
 We believe the next big step forward for LLMs is improving their understanding of
-pragmatic language -- viewing language as a collaborative, communicative effort. The distinction between communication and fluent text generation is precisely pragmatic understanding[^1]. Successful communication requires the speaker's implications to be understood by the addressee. Our everyday language is riddled with implicated meaning determined by
+pragmatic language -- viewing language as a collaborative, communicative effort influenced by context. The distinction between communication and fluent text generation is precisely pragmatic understanding[^1]. Successful communication requires the speaker's implications to be understood by the addressee. Our everyday language is riddled with implicated meaning determined by
 context; almost every conversation will contain examples of it. Consider again an exchange, taken from the dataset used in this paper:
 
 > Esther: Did you leave fingerprints? \\
@@ -106,8 +106,8 @@ The task begins:
 
 For all the results, check out <a href="TODO: arxiv link" target="_blank">the paper</a>. Here I'll briefly summarise the main findings.
 The set of large language model classes we evaluate can be grouped into four distinct categories: (1) base models (namely RoBERTa, BERT,
-GPT-2, GPT-3, OPT, BLOOM, and EleutherAI, (2) instructable LLMs finetuned with reinforcement learning (OpenAI's Davinci-001 and Davinci-002 of the class InstructGPT),
-(3) instructable LLMs finetuned on downstream tasks (T0 and Flan-T5), and (4) LLMs finetuned on dialogue (BlenderBot).
+GPT-2, EleutherAI, BLOOM, OPT, Cohere, and GPT-3, (2) LLMs finetuned on dialogue (BlenderBot),
+(3) instructable LLMs finetuned on downstream tasks (T0 and Flan-T5), and (4) instructable LLMs finetuned with an unknown method (OpenAI's latest InstructGPT-3 series, i.e. text-\<engine\>-001, and text-davinci-002).
 Each group contains one or more model classes for which we evaluate a range of model sizes.
 Random performance on the dataset is 50% accuracy, humans obtain on average 86.2% accuracy, and the best humans obtained 89%.
 
@@ -115,23 +115,44 @@ Random performance on the dataset is 50% accuracy, humans obtain on average 86.2
 
 <img src="/images/accuracy_v_size_k=0.png" alt="An image showing a scaling line plot with accuracy on the y-axis and log model size on the x-axis. The image shows multiple lines, each representing a model like InstructGPT, the show a logarithmically increasing line from about 55% accuracy for the worst model to 72% accuracy for the best model. The plot also shows human performance as a horizontal line at 86% accuracy." width="600" class="center"/>
 
-OpenAI's instructable models are the best model classes we look at, with InstructGPT obtaining 72% zero-shot accuracy. This leaves a gap of 13.9% with human performance. The best models of the other classes we look at achieve between 53.4% (BlenderBot-2.7B) and  63.3% (Flan-T5-780M) zero-shot accuracy.
+OpenAI's instructable models are the best model classes we look at, with InstructGPT-3-175B obtaining 72% zero-shot accuracy. This leaves a gap of 13.9% with human performance. The best models of the other classes we look at achieve between 53.4% (BlenderBot-2.7B) and  63.3% (Flan-T5-780M) zero-shot accuracy.
+
+Surprisingly, most models end up with a slope close to zero or even below zero. The only model classes for which the largest model actually does best is InstructGPT-3, Cohere, and T0. For GPT-3 the 1.3B
+parameter model does better than the 175B one, and for Flan-T5 the smallest model of the class outperforms all others!
 
 _For details see the paper: section 4.1, Figure 2 left, Table 1_
 
-#### <span style="color:#C0392B">Instruction fine-tuning significantly outperforms all other models</span>
-The instructable models InstructGPT and Davinci-002 obtain a significantly better performance than all other models,
-respectively obtaining 72% and 70.6% accuracy. This is 7.3% better than the best model of all other groups. Perhaps we can improve their zero-shot performance with better prompting?
+*Side notes*. There is a lot more to unpack in this image, much of which we did not get into in the main paper, if only because it's hard to draw conclusions. For example, we cannot say why InstructGPT-3 does better than
+other models, we have no idea about the method used to train this model. Additionally, what is going on with that Flan-T5 curve? Why do some model classes peak in performance with a smaller model than their largest?
+What would happen if we scale up even further? And how would models like Chinchilla, PaLM, and LaMDA perform? All open questions.
 
-_For details see the paper: section 4.1, Figure 2 left, Table 1_
+#### <span style="color:#C0392B">Additional instruction prompts</span>
+Perhaps we can improve the zero-shot performance of the best models with better prompting? For the three OpenAI models (GPT-3, InstructGPT-3-175B, and text-davinci-002) we attempt the zero-shot experiment again, but now with more elaborate prompts containing detailed instructions (see example introduced above). It does not help.
 
-#### <span style="color:#C0392B">Instruction prompts do not help</span>
-For the three OpenAI models (GPT-3, InstructGPT, and Davinci-002) we attempt the zero-shot experiment again, but now with more elaborate prompts containing detailed instructions. This does not improve performance.
+<img src="/images/extra_prompts_table.png" alt="." width="200" class="center"/>
 
-_For details see the paper: section 4.1, Table 3_
+_For details see the paper: section 4.1_
 
-#### <span style="color:#C0392B">In-context prompting helps a lot</span>
-We use the original 6 prompt templates, but now add in-context examples. At $$k=30$$ we find that performance jumps to 80.6% for Davinci-002, which is near-human performance! It does not help much for the other models.
+#### <span style="color:#C0392B">In-context prompting</span>
+We use the original 6 prompt templates, but now add in-context examples. At $$k=30$$ we find that performance jumps to 80.6% for text-davinci-002, which is near-human performance! It does not help much for the other models.
+
+Additionally, which (type of) prompt template works best is different for each model class, and which benefits most from in-context prompting as well. Below
+we see the relative accuracy increase over zero-shot for InstructGPT-3-175B, Cohere-52B, and OPT-175B.
+
+<img src="/images/accuracy_v_k_subplots.png" alt="." width="700" class="center"/>
+
+Template 2, 5, and 6 are natural prompt templates (dotted lines above) and are similar to the ones we've already introduced above, e.g.
+
+> Esther asked "Want to stay for a nightcap?" and Juan responded "I've gotta get up early", which means
+
+Template 1, 3, and 4 are structured prompt template (dashed lines above)  has a form like:
+
+> Question: Want to stay for a nightcap? \\
+> Response: I've gotta get up early. \\
+> Meaning: No. 
+
+We see in the plot above that InstructGPT-3-175B benefits relatively equally from in-context prompting for each prompt template,
+whereas Cohere-52B is better at natural prompts zero-shot and mostly benefits from in-context prompting for structured prompts and OPT-175B vice-versa.
 
 _For details see the paper: section 4.2, Figure 2 right, Figure 4_
 
@@ -149,7 +170,7 @@ the night before.
 
 We find that humans obtain 83.2% accuracy on context-heavy examples and the best performing model obtains an accuracy of 59.7% zero-shot.
 This increases the zero-shot performance gap between the best performing model and humans to 23.5%. Again, in-context prompting helps a lot. Still, at $$k=30$$ the gap on context-heavy examples
-is 8.8% for the best performing model (Davinci-002).
+is 8.8% for the best performing model (text-davinci-002).
 
 _For details see the paper: section 4.1, section 4.2, Table 2, Figure 3_
 
