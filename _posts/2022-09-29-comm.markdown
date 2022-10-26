@@ -92,6 +92,8 @@ All examples in the dataset we use resolve to a simple "yes" or "no". We use a s
 in-context prompting. In an attempt to push the zero-shot performance of the best performing models we further test them with three instruction prompts recently used by researchers at DeepMind for their model Sparrow [^3].
 For example:
 
+**Instruction prompt**
+
 > The following text shows an interaction between two humans called Esther and Juan. \\
 In the interaction, Esther will ask Juan a question, and Juan will give an answer that has a meaning
 besides the literal meaning of the words. \\
@@ -122,12 +124,12 @@ parameter model does better than the 175B one, and for Flan-T5 the smallest mode
 
 _For details see the paper: section 4.1, Figure 2 left, Table 1_
 
-*Side notes*. There is a lot more to unpack in this image, much of which we did not get into in the main paper, if only because it's hard to draw conclusions. For example, we cannot say why InstructGPT-3 does better than
+*Side notes*. There is a lot more to unpack in this plot, much of which we did not get into in the main paper, if only because it's hard to draw conclusions. For example, we cannot say _why_ InstructGPT-3 does better than
 other models, we have no idea about the method used to train this model. Additionally, what is going on with that Flan-T5 curve? Why do some model classes peak in performance with a smaller model than their largest?
 What would happen if we scale up even further? And how would models like Chinchilla, PaLM, and LaMDA perform? All open questions.
 
 #### <span style="color:#C0392B">Additional instruction prompts</span>
-Perhaps we can improve the zero-shot performance of the best models with better prompting? For the three OpenAI models (GPT-3, InstructGPT-3-175B, and text-davinci-002) we attempt the zero-shot experiment again, but now with more elaborate prompts containing detailed instructions (see example introduced above). It does not help.
+Perhaps we can improve the zero-shot performance of the best models with better prompting? For the three OpenAI models (GPT-3, InstructGPT-3-175B, and text-davinci-002) we attempt the zero-shot experiment again, but now with more elaborate prompts containing detailed instructions (see the instruction prompt introduced above). It does not help.
 
 <img src="/images/extra_prompts_table.png" alt="." width="200" class="center"/>
 
@@ -143,7 +145,7 @@ we see the relative accuracy increase over zero-shot for InstructGPT-3-175B, Coh
 
 Template 2, 5, and 6 are natural prompt templates (dotted lines above) and are similar to the ones we've already introduced above, e.g.
 
-> Esther asked "Want to stay for a nightcap?" and Juan responded "I've gotta get up early", which means
+> Esther asked "Want to stay for a nightcap?" and Juan responded "I've gotta get up early", which means no.
 
 Template 1, 3, and 4 are structured prompt template (dashed lines above)  has a form like:
 
@@ -165,7 +167,11 @@ An example of a context-free implicature is the following:
 
 It is an implicature[^4], because the hidden meaning we can infer is that Juan does not know **all** the people. However, we do not need context to resolve it,
 the implicature is resolved by the _conventional meaning of the word_ some. The nightcap example used earlier in this post is an example of a context-heavy
-example. We need the contextual commonsense knowledge that having to work early the next morning usually means we do not want to go drinking
+example.
+
+> Esther asked "Want to stay for a nightcap?" and Juan responded "I've gotta get up early", which means no.
+
+We need the contextual commonsense knowledge that having to work early the next morning usually means we do not want to go drinking
 the night before. 
 
 We find that humans obtain 83.2% accuracy on context-heavy examples and the best performing model obtains an accuracy of 59.7% zero-shot.
