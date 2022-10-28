@@ -110,13 +110,13 @@ For all the results, check out <a href="https://arxiv.org/abs/2210.14986" target
 
 The set of large language model classes we evaluate can be grouped into four distinct categories: 
 
-**(1)** base models: RoBERTa, BERT, GPT-2, EleutherAI, BLOOM, OPT, Cohere, and GPT-3
+**(1)** base models: RoBERTa, BERT, GPT-2, EleutherAI, BLOOM, OPT, Cohere, and GPT-3 (solid lines in plot below)
 
-**(2)** LLMs finetuned on dialogue: BlenderBot
+**(2)** LLMs finetuned on dialogue: BlenderBot (dotted line in plot below)
 
-**(3)** instructable LLMs finetuned on downstream tasks: T0 and Flan-T5
+**(3)** instructable LLMs finetuned on downstream tasks: T0 and Flan-T5 (dashed lines below)
 
-**(4)** instructable LLMs finetuned with an unknown method: OpenAI's latest InstructGPT-3 series (i.e. text-\<engine\>-001, and text-davinci-002)
+**(4)** instructable LLMs finetuned with an unknown method: OpenAI's latest InstructGPT-3 series (dash-dot line below, i.e. text-\<engine\>-001, and text-davinci-002)
 
 Each group contains one or more model classes for which we evaluate a range of model sizes.
 Random performance on the dataset is 50% accuracy, humans obtain on average 86.2% accuracy, and the best humans obtained 89%.
