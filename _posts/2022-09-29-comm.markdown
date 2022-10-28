@@ -195,18 +195,6 @@ _For details see the paper: section 4.1, section 4.2, Table 2, Figure 3_
 We identify language pragmatics as a crucial aspect of communication that current SOTA LLMs are missing. We evaluate LLMs on a simple test of pragmatics that requires binary resolution and find that they struggle. This opens the door to more complex tests of pragmatic understanding. We are excited about
 the prospects of large language models becoming "communicators" by improving their pragmatic language skills. You can read about our work in more detail <a href="https://arxiv.org/abs/2210.14986" target="_blank">here</a>.
 
-[//]: # (### <span style="color:#C0392B">A note on open research</span>)
-
-[//]: # (The reader might wonder how I can use LaMDA's passing of a &#40;variation of&#41; the Turing test as a motivating example)
-
-[//]: # (of LLMs abilities that we critique here without actually evaluating LaMDA. We've tried to get access to LaMDA &#40;and Chinchilla and PaLM&#41;,)
-
-[//]: # (but to no avail. We invite the LaMDA authors and other researchers to further motivate the conversational abilities of their)
-
-[//]: # (model by also evaluating on the implicature benchmark. If it passes, it will provide us with another important datapoint that hints at what publicly available)
-
-[//]: # (models need to improve!)
-
 # <span style="color:#2874A6">Sources</span>
 
 [^1]: Nicely outlined by G.M. Green, 1996. in <a href="https://books.google.de/books?id=_ip9T4LONvkC" target="_blank">*Pragmatics and Natural Language Understanding.*</a>
