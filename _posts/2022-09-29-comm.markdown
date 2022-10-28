@@ -12,7 +12,7 @@ date:   2022-09-29 10:09:17 -0500
 <span style="color:#C0392B">TL;DR</span>. Understanding of pragmatics is an essential and ubiquitous part of human communication. We show large language models (LLMs) mostly don't capture this aspect of language, hindering their applicability in the real world. Our analysis indicates where the largest room for improvement is to ultimately make this technology more useful.
 {: style="color:black; font-size: 100%; text-align: left;"}
 
-<span style="color:#C0392B">Paper</span>. TODO
+<span style="color:#C0392B">Paper</span>. <a href="https://arxiv.org/abs/2210.14986" target="_blank">ArXiv</a>
 
 <span style="color:#C0392B">Code</span>. <a href="https://github.com/LauraRuis/do-pigs-fly" target="_blank">GitHub</a>
 
@@ -23,7 +23,7 @@ date:   2022-09-29 10:09:17 -0500
 ## <span style="color:#C0392B">Introduction</span>
 
 Recently, a large language model (LLM) called LaMDA beautifully <a href="https://www.washingtonpost.com/technology/2022/06/11/google-ai-lamda-blake-lemoine/" target="_blank">passed (a variation of) the Turing test</a>.
-In <a href="TODO: arxiv link" target="_blank">our most recent paper</a>'s title we state that LLMs are not zero-shot communicators. How can these two things both be true? What do we mean by "communicators"? In this post I'll motivate the statement by summarising the paper's results. 
+In <a href="https://arxiv.org/abs/2210.14986" target="_blank">our most recent paper</a>'s title we state that LLMs are not zero-shot communicators. How can these two things both be true? What do we mean by "communicators"? In this post I'll motivate the statement by summarising the paper's results. 
 
 Consider the following exchange between a human and InstructGPT.
 
@@ -71,7 +71,7 @@ All this can be grouped under the
 term **context**. The way we use the term here is not to be confused with the way its often used in NLP: the literal semantic context around an utterance. On the contrary, the type of context we are referring to here is generally not explicitly part of a conversation.
 Pragmatic analysis goes beyond syntax and compositional semantics of utterances, instead looking at how context determines meaning.
 
-To see a more in-depth introduction of implicature refer to Appendix B of <a href="TODO: arxiv link" target="_blank">our paper</a>.
+To see a more in-depth introduction of implicature refer to Appendix B of <a href="https://arxiv.org/abs/2210.14986" target="_blank">our paper</a>.
 Also, check out <a href="https://www.deepmind.com/blog/in-conversation-with-ai-building-better-language-models" target="_blank">concurrent theoretical work</a> by DeepMind researchers emphasising the importance of pragmatic language understanding for value alignment. 
 
 ## <span style="color:#C0392B">Evaluating Large Language Models</span>
@@ -106,7 +106,7 @@ The task begins:
 
 ### <span style="color:#C0392B">Sneak-peak into the results</span>
 
-For all the results, check out <a href="TODO: arxiv link" target="_blank">the paper</a>. Here I'll briefly summarise the main findings.
+For all the results, check out <a href="https://arxiv.org/abs/2210.14986" target="_blank">the paper</a>. Here I'll briefly summarise the main findings.
 The set of large language model classes we evaluate can be grouped into four distinct categories: (1) base models (namely RoBERTa, BERT,
 GPT-2, EleutherAI, BLOOM, OPT, Cohere, and GPT-3, (2) LLMs finetuned on dialogue (BlenderBot),
 (3) instructable LLMs finetuned on downstream tasks (T0 and Flan-T5), and (4) instructable LLMs finetuned with an unknown method (OpenAI's latest InstructGPT-3 series, i.e. text-\<engine\>-001, and text-davinci-002).
@@ -183,7 +183,7 @@ _For details see the paper: section 4.1, section 4.2, Table 2, Figure 3_
 ## <span style="color:#C0392B">Conclusion</span>
 
 We identify language pragmatics as a crucial aspect of communication that current SOTA LLMs are missing. We evaluate LLMs on a simple test of pragmatics that requires binary resolution and find that they struggle. This opens the door to more complex tests of pragmatic understanding. We are excited about
-the prospects of large language models becoming "communicators" by improving their pragmatic language skills. You can read about our work in more detail <a href="TODO: arxiv link" target="_blank">here</a>.
+the prospects of large language models becoming "communicators" by improving their pragmatic language skills. You can read about our work in more detail <a href="https://arxiv.org/abs/2210.14986" target="_blank">here</a>
 
 [//]: # (### <span style="color:#C0392B">A note on open research</span>)
 
