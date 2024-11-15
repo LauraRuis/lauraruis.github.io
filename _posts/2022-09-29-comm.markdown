@@ -9,7 +9,7 @@ date:   2022-09-29 10:09:17 -0500
 
 <span style="color:#C0392B">Authors</span>. Laura Ruis, Akbir Khan, Stella Biderman, Sara Hooker, Tim Rocktäschel, Edward Grefenstette.
 
-<span style="color:#C0392B">TL;DR</span>. Understanding of pragmatics is an essential and ubiquitous part of human communication. We show large language models (LLMs) mostly don't capture this aspect of language, hindering their applicability in the real world. Our analysis indicates where the largest room for improvement is to ultimately make this technology more useful.
+<span style="color:#C0392B">TL;DR</span>. Understanding of pragmatics is an essential and ubiquitous part of human communication. We show large language models (LLMs) mostly don't capture this aspect of language zero-shot, hindering their applicability in the real world. Our analysis indicates where the largest room for improvement is to ultimately make this technology more useful.
 {: style="color:black; font-size: 100%; text-align: left;"}
 
 <span style="color:#C0392B">Paper</span>. <a href="https://arxiv.org/abs/2210.14986" target="_blank">ArXiv</a>
@@ -200,4 +200,4 @@ the prospects of large language models becoming "communicators" by improving the
 [^1]: Nicely outlined by G.M. Green, 1996. in <a href="https://books.google.de/books?id=_ip9T4LONvkC" target="_blank">*Pragmatics and Natural Language Understanding.*</a>
 [^2]: The data was curated by Elizabeth Jasmi George and Radhika Mamidi, find the paper introducing it <a href="https://app.dimensions.ai/details/publication/pub.1128198497" target="_blank">here</a>.
 [^3]: Amelia Glaese et al, 2022. <a href="https://arxiv.org/pdf/2209.14375.pdf" target="_blank">*Improving alignment of dialogue agents via targeted human judgements*</a>
-[^4]: It is an implicature if you adhere to Gricean definitions, if you read work on pragmatics by other researchers (e.g. Chriss Potts), these type of examples are actually resolved fully through semantics and are not considered implicatures (see Appendix B in the paper).
+[^4]: It is an implicature if you adhere to Gricean definitions, if you read work on pragmatics by other researchers (e.g. Chris Potts), these type of examples are actually resolved fully through semantics and are not considered implicatures (see Appendix B in the paper).
