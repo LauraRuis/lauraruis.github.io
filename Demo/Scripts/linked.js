@@ -11,7 +11,7 @@ window.onload = function() {
 
     // array of filenames that contain the data
     const filenames = [
-        "../DATA/answer_and_slope_pretraining_data_prepared_35B.json", "../DATA/answer_and_slope_pretraining_data_prepared_7B.json"];
+        "../Data/answer_and_slope_pretraining_data_prepared_35B.json", "../Data/answer_and_slope_pretraining_data_prepared_7B.json"];
 
     var defaultColor = d3.rgb("#d4d4d4");
 
@@ -33,6 +33,8 @@ window.onload = function() {
         .text("To load the influences for a query, click on a query in the right two tables.");
     infoContainer.append("p")
         .text("To see the most relevant documents, click on the query and sort from high to low influence score.")
+    infoContainer.append("p")
+        .text("To expand the document text and see all 512 tokens, click on it.")
     infoContainer.append("p")
         .text("We are working on releasing more data! Stay tuned.")
     infoContainer.append("h4")
