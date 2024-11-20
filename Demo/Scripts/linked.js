@@ -23,7 +23,7 @@ window.onload = function() {
 
     // select info svg and put some text
     var infoContainer = d3.select("#info")
-        .attr("class", "col-xs-6");
+        .attr("class", "col-xs-12");
     infoContainer.append("h4")
         .text("Coming up: influence scores for top and bottom 20 documents for each query by the 7B and 35B");
     infoContainer.append("p")
@@ -73,7 +73,7 @@ window.onload = function() {
 
     // append svg for map
     var queryTableContainer = d3.select("#charts")
-        .attr("class", "col-xs-6");
+        .attr("class", "col-xs-4");
 
 
     // initialize array for keeping track of selected countries
@@ -237,9 +237,9 @@ window.onload = function() {
         // bootstrap table
         var table = d3.select("#table").append("table")
                 .attr("id", table_id)
-                .attr("class", "table table-hover table-responsive col-xs-6")
+                .attr("class", "table table-hover table-responsive col-xs-8")
                 // make width 100%
-                .style("width", "100%"),
+                // .style("width", "100%"),
             thead = table.append("thead"),
             tbody = table.append("tbody");
 
