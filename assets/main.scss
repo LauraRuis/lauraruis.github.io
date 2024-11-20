@@ -1,0 +1,110 @@
+---
+# Only the main Sass file needs front matter (the dashes are enough)
+---
+
+@import "minima";
+
+/* Title styling for subtle look above the callout with zero spacing */
+article .callout-title {
+  font-weight: bold;
+  color: #444; /* Dark gray for subtle effect */
+  font-size: 1em; /* Slightly smaller font size */
+  display: inline-block;
+  padding-left: 3px; /* Optional: slight indent for alignment */
+  margin: 0; /* Remove any margins */
+  padding-bottom: 2px; /* Slight padding for a bit of space */
+}
+/* Basic callout styling */
+article .callout-title {
+  font-weight: bold;
+  color: #C0392B; /* Dark gray for subtle effect */
+  // background-color: #fce2dfb3;
+  // border: 1px solid #C0392B; /* Light bottom border */
+  // border-top: 1px solid #C0392B; /* Light bottom border */
+  // border-radius: 5px; /* Rounded top left corner */
+  // border-top-right-radius: 5px; /* Rounded top right corner */
+  font-size: 1em; /* Slightly smaller font size */
+  margin: 0; /* Remove any margin */
+  padding: 0 0 0px 0px; /* Minimal bottom padding for spacing */
+  display: block; /* Ensure it's above the callout */
+  padding-left: 3px;
+  // box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1); /* Subtle shadow for title */
+}
+
+/* General callout styling */
+article .callout {
+  // border-top: 5px solid #C0392B;
+  // border-bottom: 5px solid #C0392B;
+  padding: 15px;
+  margin: 0px 0 20px 0; /* Only add bottom margin for space below the callout */
+  border-radius: 5px;
+  background-color: #FFF1F3;
+  // box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Callout types */
+.callout-hypothesis {
+  border-left: 5px solid #C0392B;
+  padding: 15px;
+  margin-top: 1px;
+  border-radius: 5px;
+  background-color: #fce2df; /* Soft blue background */
+  // color: #004080; /* Darker text for contrast */
+  font-family: Arial, sans-serif; /* Optional: change font for callouts */
+  // box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
+}
+
+.callout-info {
+  // border-left: 5px solid #C0392B;
+  border-left: 4px solid #C0392B;
+  padding: 15px;
+  margin: 20px 0;
+  // border-radius: 5px;
+  background-color: #fce2df; /* Soft blue background */
+  // color: #004080; /* Darker text for contrast */
+  font-family: Arial, sans-serif; /* Optional: change font for callouts */
+  // box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
+}
+
+.callout-rq {
+  border-left: 5px solid #C0392B;
+  padding: 15px;
+  margin: 20px 0;
+  border-radius: 5px;
+  background-color: #fce2df; /* Soft blue background */
+  // color: #004080; /* Darker text for contrast */
+  font-family: Arial, sans-serif; /* Optional: change font for callouts */
+  // box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
+}
+
+.callout-warning {
+  border-left-color: #FFA500;
+  background-color: #fff8e1;
+}
+
+.callout-error {
+  border-left-color: #E53E3E;
+  background-color: #ffe5e5;
+}
+
+/* Optional: add an icon */
+.callout-hypothesis::before {
+  content: " ";
+  font-weight: bold;
+}
+.callout-info::before {
+  content: " ";
+  font-weight: bold;
+}
+.callout-rq::before {
+  content: " ";
+  font-weight: bold;
+}
+.callout-warning::before {
+  content: "⚠️ ";
+  font-weight: bold;
+}
+.callout-error::before {
+  content: "❌ ";
+  font-weight: bold;
+}

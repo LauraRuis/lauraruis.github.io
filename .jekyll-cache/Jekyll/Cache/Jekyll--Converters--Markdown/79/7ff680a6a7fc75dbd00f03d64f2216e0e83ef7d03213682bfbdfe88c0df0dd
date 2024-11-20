@@ -1,0 +1,917 @@
+I"��<script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+
+<p><img src="/images/opener_gif/opener.gif" alt="annotated_example" /></p>
+
+<p>In this final part of the series on structured prediction with linear-chain CRFs we will use our implementation from <a href="/2021/01/25/crfpt2.html">part two</a>
+to train a model on real data.
+To learn such a model, we need a dataset with examples consisting of input sentences annotated with POS tags.
+We will choose the <a href="http://universaldependencies.org/" target="_blank">Universal Dependencies</a> dataset (<a href="https://www.aclweb.org/anthology/L14-1067/" target="_blank">Silveira et al., 2014</a>).</p>
+
+<p>Then all the things we need to implement are:</p>
+
+<ul>
+  <li>
+    <p>A <code class="language-plaintext highlighter-rouge">Vocabulary</code> to convert from strings to numerical values for computational models.</p>
+  </li>
+  <li>
+    <p>A <code class="language-plaintext highlighter-rouge">TaggingDataset</code> to convert all our data to <code class="language-plaintext highlighter-rouge">Tensors</code> that can be processed by <a href="https://pytorch.org/" target="_blank">PyTorch</a>.</p>
+  </li>
+  <li>
+    <p>A <code class="language-plaintext highlighter-rouge">train()</code> loop to train our CRF and feature-extractor end-to-end on data.</p>
+  </li>
+  <li>
+    <p>A <code class="language-plaintext highlighter-rouge">test()</code> loop to test a trained model on new data.</p>
+  </li>
+</ul>
+
+<p>Additionally, we will slightly chance the <code class="language-plaintext highlighter-rouge">Encoder</code> and <code class="language-plaintext highlighter-rouge">Tagger</code> from <a href="/2021/01/25/crfpt2.html">part two</a> to incorporate
+a character-based model.</p>
+
+<h1 id="imports"><span style="color:#C0392B">Imports</span></h1>
+<p>Let’s install and import the libraries we need (<code class="language-plaintext highlighter-rouge">TorchNLP</code> isn’t part of the default runtime in Google Colab,
+which I used for the implementation):</p>
+
+<p><code class="language-plaintext highlighter-rouge">!pip install torchnlp pytorch-nlp</code></p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="kn">import</span> <span class="nn">torch.nn</span> <span class="k">as</span> <span class="n">nn</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">torchnlp</span>
+<span class="kn">from</span> <span class="nn">torchnlp.datasets</span> <span class="kn">import</span> <span class="n">ud_pos_dataset</span>
+
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Iterator</span>
+<span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">Tensor</span>
+<span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">defaultdict</span><span class="p">,</span> <span class="n">Counter</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="n">np</span>
+
+<span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">device</span><span class="p">(</span><span class="s">"cuda"</span> <span class="k">if</span> <span class="n">torch</span><span class="p">.</span><span class="n">cuda</span><span class="p">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s">"cpu"</span><span class="p">)</span></code></pre></figure>
+
+<p>To make sure that CUDA is in fact available (which is definitely nice and maybe even necessary for training
+on the universal dependencies dataset), Google Colab offers sessions with a GPU! Select this in the runtime in the top-right
+corner if you’re coding everything yourself.</p>
+
+<h2 id="the-vocabulary--dataset"><span style="color:#C0392B">The Vocabulary &amp; Dataset</span></h2>
+
+<p>First, we’ll implement the vocabulary, which is a class that reads sentences as lists of strings, and
+converts them to indices. Something pragmatical for sequence prediction with neural methods is that we often use an <code class="language-plaintext highlighter-rouge">&lt;UNK&gt;</code>-token.
+In our training set, if a word occurs very infrequently, we probably cannot learn meaningful embeddings for it
+and we can replace the occurrences of that word by <code class="language-plaintext highlighter-rouge">&lt;UNK&gt;</code>. This means that we will learn a kind of average embedding
+for all infrequent words, and we can use this token again at test-time. At test-time there will inevitably be words
+that don’t occur in the training set, and since we don’t have trained embeddings for those, they will map onto the <code class="language-plaintext highlighter-rouge">&lt;UNK&gt;</code>-token.</p>
+
+<p>One other approach to deal with unknown words in the test data is using a character model. It’s unlikely that we
+won’t encounter a certain character, so when a word is unknown, a character model can represent it more meaningfully.
+One could imagine that at test time the model encounters and word it hasn’t seen at training time ending with “-ing”, the word model will represent it with
+an unknown token <code class="language-plaintext highlighter-rouge">&lt;UNK&gt;</code>, but the character model might recognize that this is likely a verb. Additionally, if there are
+misspelled words in the test data, the word vocabulary won’t know them, but the character model might recognize them.
+Adding a character model makes our method more robust to noise in the data.</p>
+
+<p>Note that adding a character model doesn’t
+change anything about the way we desribed our implementation in part two of the series. We simply add a learned representation
+to the representations we already had for the words, but this time character-based. The only change lies in
+batching, which I’ll discuss below.</p>
+
+<p>Both the code for the <code class="language-plaintext highlighter-rouge">Vocabulary</code> and the <code class="language-plaintext highlighter-rouge">TaggingDataset</code> below is very straightforward, so if you’re familiar with
+these kind of methods just skip them and go to the part below where we look at the Universal Dependencies dataset.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">class</span> <span class="nc">Vocabulary</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="s">"""
+    Object that maps tokens (e.g., words, characters) to indices to be 
+    processed by numerical models.
+    """</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pad_token</span><span class="o">=</span><span class="s">"&lt;PAD&gt;"</span><span class="p">,</span> <span class="n">unk_token</span><span class="o">=</span><span class="s">"&lt;UNK&gt;"</span><span class="p">):</span>
+      <span class="s">"""
+      &lt;PAD&gt; and &lt;UNK&gt; tokens are by construction idxs 0 and 1.
+      """</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">pad_token</span> <span class="o">=</span> <span class="n">pad_token</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">unk_token</span> <span class="o">=</span> <span class="n">unk_token</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">_idx_to_token</span> <span class="o">=</span> <span class="p">[</span><span class="n">pad_token</span><span class="p">,</span> <span class="n">unk_token</span><span class="p">]</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">_token_to_idx</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span>
+          <span class="k">lambda</span><span class="p">:</span> <span class="bp">self</span><span class="p">.</span><span class="n">_idx_to_token</span><span class="p">.</span><span class="n">index</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">pad_token</span><span class="p">))</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">_token_to_idx</span><span class="p">[</span><span class="n">pad_token</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">_token_to_idx</span><span class="p">[</span><span class="n">unk_token</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">_token_frequencies</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">token_to_idx</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+      <span class="k">if</span> <span class="n">token</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">.</span><span class="n">_token_to_idx</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="p">.</span><span class="n">_token_to_idx</span><span class="p">[</span><span class="bp">self</span><span class="p">.</span><span class="n">unk_token</span><span class="p">]</span>
+      <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="p">.</span><span class="n">_token_to_idx</span><span class="p">[</span><span class="n">token</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">idx_to_token</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+      <span class="k">return</span> <span class="bp">self</span><span class="p">.</span><span class="n">_idx_to_token</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
+    
+    <span class="o">@</span><span class="nb">property</span>
+    <span class="k">def</span> <span class="nf">unk_idx</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+      <span class="k">return</span> <span class="bp">self</span><span class="p">.</span><span class="n">token_to_idx</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">unk_token</span><span class="p">)</span>
+
+    <span class="o">@</span><span class="nb">property</span>
+    <span class="k">def</span> <span class="nf">size</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+      <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">_idx_to_token</span><span class="p">)</span>
+    
+    <span class="o">@</span><span class="nb">property</span>
+    <span class="k">def</span> <span class="nf">pad_idx</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+      <span class="k">return</span> <span class="bp">self</span><span class="p">.</span><span class="n">token_to_idx</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">pad_token</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">add_token_sequence</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token_sequence</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]):</span>
+      <span class="k">for</span> <span class="n">token</span> <span class="ow">in</span> <span class="n">token_sequence</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">token</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">.</span><span class="n">_token_to_idx</span><span class="p">:</span>
+          <span class="bp">self</span><span class="p">.</span><span class="n">_token_to_idx</span><span class="p">[</span><span class="n">token</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">size</span>
+          <span class="bp">self</span><span class="p">.</span><span class="n">_idx_to_token</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">_token_frequencies</span><span class="p">[</span><span class="n">token</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+    
+    <span class="k">def</span> <span class="nf">most_common</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+      <span class="k">return</span> <span class="bp">self</span><span class="p">.</span><span class="n">_token_frequencies</span><span class="p">.</span><span class="n">most_common</span><span class="p">(</span><span class="n">n</span><span class="o">=</span><span class="n">n</span><span class="p">)</span></code></pre></figure>
+
+<p>We will use the above <code class="language-plaintext highlighter-rouge">Vocabulary</code>-class three times in the following, once for the input data consisting of words,
+once for the input data processed character-by-character,
+and once for the target data consisting of POS tags.</p>
+
+<p>Before we implement the dataset class, let’s have a look at what
+a batch looks like if we add characters. Everything becomes a bit more complicated in the code, because we want
+a batched implementation of the forward pass. Recall that in <a href="/2021/01/25/crfpt2.html">part two</a> of this series, we had a vector of features for 
+each word produced by the bidirectional LSTM. We now also want to add a vector that represents that same word broken up in characters. We denoted by 
+\(\mathbf{\bar{H}} \in \mathbb{R}^{m \times 2d_h}\) the hidden vectors for each input word in the sentence of length \(m\) as produced by the biLSTM.
+We want to obtain some character-based features that have the exact same size, so we can add them.
+Let’s denote the number of characters of the longest word in this sentence by \(k\) and define the character input by
+\(\mathbf{x}_c \in \mathbb{R}^{m \times k \times |C|}\) (changing the definition of the input sequence of words from \(\mathbf{x}\) (in part two) to \(\mathbf{x}_w\)).
+ If we want to add these to the word features in a batched fashion
+instead of a loop, we need to get a
+vector that has the same size as the word features that the biLSTM returned. This means we need to have character sequences for the padding tokens
+in our batch
+as well. This feels a bit silly, because we will just be adding zeros to zeros, but it’s simply done so we can implement everything in
+a batched fashion instead of with a loop. It also means we need to use the same hidden size for the bidirectional LSTM we’ll use for the characters. A batch that contains characters will have the following in tuples of examples:</p>
+
+\[\mathbf{x}_w \in \mathbb{R}^{m \times |I|}, \mathbf{x}_c \in \mathbb{R}^{m \times k \times |C|}, \mathbf{y} \in \mathbb{R}^{m \times |S|}\]
+
+<p>Where \(\mathbf{x}_w\) is the input sequence in words, with \(|I|\) the size of the input vocabulary, \(\mathbf{x}_c\) is the input
+sequence broken up in characters for each word, and \(\mathbf{y}\) the tag sequence with \(|S|\) the number of tags in our dataset.
+To be able to add the character-based words to the regular words, we pad each sequence in the batch to the maximum \(m\) that occurs in the batch (both the sequence of words, and the sequence of character sequences),
+and we pad each word to the maximum number of characters \(k\) appearing in the entire batch. See below a new graphical
+depiction of a batch with batchsize \(B = 2\).</p>
+
+<p><img src="/images/batch_char.png" alt="batch_char" width="800" class="center" /></p>
+
+<p>Then the next class to implement is the class that holds the <code class="language-plaintext highlighter-rouge">TaggingDataset</code>:</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">class</span> <span class="nc">TaggingDataset</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+  <span class="s">"""
+  A class to hold data pairs of input words, characters, and target tags.
+  """</span>
+
+  <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">List</span><span class="p">,</span> <span class="n">List</span><span class="p">]]):</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">_input_vocabulary</span> <span class="o">=</span> <span class="n">Vocabulary</span><span class="p">()</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">_char_vocabulary</span> <span class="o">=</span> <span class="n">Vocabulary</span><span class="p">()</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">_target_vocabulary</span> <span class="o">=</span> <span class="n">Vocabulary</span><span class="p">()</span>
+
+    <span class="c1"># Read the training data and add each example to the vocabularies.
+</span>    <span class="n">examples</span><span class="p">,</span> <span class="n">example_lengths</span><span class="p">,</span> <span class="n">char_max_lengths</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">read_dataset</span><span class="p">(</span>
+        <span class="n">data</span><span class="p">,</span> <span class="n">add_to_vocabularies</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">data</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s">"train"</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s">"examples"</span><span class="p">:</span> <span class="n">examples</span><span class="p">,</span>
+            <span class="s">"example_lengths"</span><span class="p">:</span> <span class="n">example_lengths</span><span class="p">,</span>
+            <span class="s">"char_max_lengths"</span><span class="p">:</span> <span class="n">char_max_lengths</span>
+        <span class="p">},</span>
+        <span class="s">"test"</span><span class="p">:</span> <span class="p">{}.</span> <span class="c1"># We will add the test examples later.
+</span>    <span class="p">}</span>
+
+  <span class="k">def</span> <span class="nf">add_testset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">examples</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">torch</span><span class="p">.</span><span class="n">tensor</span><span class="p">]],</span>
+                  <span class="n">example_lengths</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">char_max_lengths</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]):</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"test"</span><span class="p">][</span><span class="s">"examples"</span><span class="p">]</span> <span class="o">=</span> <span class="n">examples</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"test"</span><span class="p">][</span><span class="s">"example_lengths"</span><span class="p">]</span> <span class="o">=</span> <span class="n">example_lengths</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"test"</span><span class="p">][</span><span class="s">"char_max_lengths"</span><span class="p">]</span> <span class="o">=</span> <span class="n">char_max_lengths</span>
+
+  <span class="k">def</span> <span class="nf">read_dataset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_data</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">List</span><span class="p">,</span> <span class="n">List</span><span class="p">]],</span>
+                   <span class="n">add_to_vocabularies</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>
+    <span class="s">"""Convert each example to a tensor and save it's length."""</span>
+    <span class="n">examples</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">example_lengths</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">char_max_lengths</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">input_list</span><span class="p">,</span> <span class="n">target_list</span> <span class="ow">in</span> <span class="n">input_data</span><span class="p">:</span>
+      <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">input_list</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">target_list</span><span class="p">),</span> <span class="s">"Invalid data example."</span>
+
+      <span class="c1"># We don't want to add the test examples to the vocabulary.
+</span>      <span class="k">if</span> <span class="n">add_to_vocabularies</span><span class="p">:</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">_input_vocabulary</span><span class="p">.</span><span class="n">add_token_sequence</span><span class="p">(</span><span class="n">input_list</span><span class="p">)</span>
+        <span class="bp">self</span><span class="p">.</span><span class="n">_target_vocabulary</span><span class="p">.</span><span class="n">add_token_sequence</span><span class="p">(</span><span class="n">target_list</span><span class="p">)</span>
+      
+      <span class="c1"># Convert the input sequence to an array of ints.
+</span>      <span class="n">input_array</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">sentence_to_array</span><span class="p">(</span><span class="n">input_list</span><span class="p">,</span> <span class="n">vocabulary</span><span class="o">=</span><span class="s">"input"</span><span class="p">)</span>
+
+      <span class="c1"># Convert each word in the sentence into a sequence of ints.
+</span>      <span class="n">char_inputs</span> <span class="o">=</span> <span class="p">[]</span>
+      <span class="n">char_max_length</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+      <span class="k">for</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">input_list</span><span class="p">:</span>
+        <span class="n">char_list</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">word</span><span class="p">)</span>
+        <span class="n">char_length</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">char_list</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">add_to_vocabularies</span><span class="p">:</span>
+          <span class="bp">self</span><span class="p">.</span><span class="n">_char_vocabulary</span><span class="p">.</span><span class="n">add_token_sequence</span><span class="p">(</span><span class="n">char_list</span><span class="p">)</span>
+        
+        <span class="c1"># Keep track of the maximum character length in a sentence for padding.
+</span>        <span class="k">if</span> <span class="n">char_length</span> <span class="o">&gt;</span> <span class="n">char_max_length</span><span class="p">:</span>
+          <span class="n">char_max_length</span> <span class="o">=</span> <span class="n">char_length</span>
+        <span class="n">char_array</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">sentence_to_array</span><span class="p">(</span><span class="n">char_list</span><span class="p">,</span> <span class="n">vocabulary</span><span class="o">=</span><span class="s">"char"</span><span class="p">)</span>
+        <span class="n">char_inputs</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">torch</span><span class="p">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">char_array</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="p">.</span><span class="nb">long</span><span class="p">,</span>
+                                        <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">).</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+      <span class="n">char_max_lengths</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">char_max_length</span><span class="p">)</span>
+      <span class="n">target_array</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">sentence_to_array</span><span class="p">(</span><span class="n">target_list</span><span class="p">,</span> <span class="n">vocabulary</span><span class="o">=</span><span class="s">"target"</span><span class="p">)</span>
+      <span class="n">input_tensor</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">input_array</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="p">.</span><span class="nb">long</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+      <span class="n">target_tensor</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">target_array</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="p">.</span><span class="nb">long</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+      <span class="n">example_lengths</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">input_tensor</span><span class="p">))</span>
+      <span class="n">examples</span><span class="p">.</span><span class="n">append</span><span class="p">({</span><span class="s">"input_tensor"</span><span class="p">:</span> <span class="n">input_tensor</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span>
+                       <span class="s">"char_input_tensor"</span><span class="p">:</span> <span class="n">char_inputs</span><span class="p">,</span>
+                       <span class="s">"target_tensor"</span><span class="p">:</span> <span class="n">target_tensor</span><span class="p">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)})</span>
+    <span class="k">return</span> <span class="n">examples</span><span class="p">,</span> <span class="n">example_lengths</span><span class="p">,</span> <span class="n">char_max_lengths</span>
+
+  <span class="k">def</span> <span class="nf">get_vocabulary</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vocabulary</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Vocabulary</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">vocabulary</span> <span class="o">==</span> <span class="s">"input"</span><span class="p">:</span>
+      <span class="n">vocab</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_input_vocabulary</span>
+    <span class="k">elif</span> <span class="n">vocabulary</span> <span class="o">==</span> <span class="s">"char"</span><span class="p">:</span>
+      <span class="n">vocab</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_char_vocabulary</span>
+    <span class="k">elif</span> <span class="n">vocabulary</span> <span class="o">==</span> <span class="s">"target"</span><span class="p">:</span>
+      <span class="n">vocab</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">_target_vocabulary</span>
+    <span class="k">else</span><span class="p">:</span>
+      <span class="k">raise</span> <span class="nb">ValueError</span><span class="p">(</span>
+          <span class="s">"Specified unknown vocabulary in sentence_to_array: {}"</span><span class="p">.</span><span class="nb">format</span><span class="p">(</span>
+              <span class="n">vocabulary</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">vocab</span>
+  
+  <span class="k">def</span> <span class="nf">sentence_to_array</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sentence</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">vocabulary</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+    <span class="s">"""
+    Convert each str word in a sentence to an integer from the vocabulary.
+    :param sentence: the sentence in words (strings).
+    :param vocabulary: whether to use the input or target vocabulary.
+    :return: the sentence in integers.
+    """</span>
+    <span class="n">vocab</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">get_vocabulary</span><span class="p">(</span><span class="n">vocabulary</span><span class="p">)</span>
+    <span class="n">sentence_array</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">sentence</span><span class="p">:</span>
+      <span class="n">sentence_array</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">vocab</span><span class="p">.</span><span class="n">token_to_idx</span><span class="p">(</span><span class="n">word</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">sentence_array</span>
+  
+  <span class="k">def</span> <span class="nf">print_stats</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">split</span><span class="o">=</span><span class="s">"train"</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">"Number of %s examples in dataset: %d</span><span class="se">\n</span><span class="s">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">split</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="n">split</span><span class="p">][</span><span class="s">"examples"</span><span class="p">])))</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">"Input vocabulary size: %d"</span> <span class="o">%</span> <span class="bp">self</span><span class="p">.</span><span class="n">_input_vocabulary</span><span class="p">.</span><span class="n">size</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">"Most common input tokens: "</span><span class="p">,</span> <span class="bp">self</span><span class="p">.</span><span class="n">_input_vocabulary</span><span class="p">.</span><span class="n">most_common</span><span class="p">(</span><span class="mi">5</span><span class="p">))</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">"</span><span class="se">\n</span><span class="s">Char vocabulary size: %d"</span> <span class="o">%</span> <span class="bp">self</span><span class="p">.</span><span class="n">_char_vocabulary</span><span class="p">.</span><span class="n">size</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">"Most common input tokens: "</span><span class="p">,</span> <span class="bp">self</span><span class="p">.</span><span class="n">_char_vocabulary</span><span class="p">.</span><span class="n">most_common</span><span class="p">(</span><span class="mi">5</span><span class="p">))</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">"</span><span class="se">\n</span><span class="s">Target vocabulary size: %d"</span> <span class="o">%</span> <span class="bp">self</span><span class="p">.</span><span class="n">_target_vocabulary</span><span class="p">.</span><span class="n">size</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">"Most common target tokens: "</span><span class="p">,</span> <span class="bp">self</span><span class="p">.</span><span class="n">_target_vocabulary</span><span class="p">.</span><span class="n">most_common</span><span class="p">(</span><span class="mi">5</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="n">split</span><span class="p">][</span><span class="s">"examples"</span><span class="p">])</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">"</span><span class="se">\n</span><span class="s">%s example: "</span> <span class="o">%</span> <span class="n">split</span><span class="p">)</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">print_example</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">split</span><span class="p">)</span>
+
+  <span class="k">def</span> <span class="nf">get_example</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">split</span><span class="o">=</span><span class="s">"train"</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">idx</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="n">split</span><span class="p">][</span><span class="s">"examples"</span><span class="p">]):</span>
+      <span class="k">raise</span> <span class="nb">ValueError</span><span class="p">(</span><span class="s">"Dataset has no example at idx %d for split %s"</span> 
+                       <span class="o">%</span> <span class="p">(</span><span class="n">idx</span><span class="p">,</span> <span class="n">split</span><span class="p">))</span>
+    <span class="n">input_tensor</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">array_to_sentence</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="n">split</span><span class="p">][</span><span class="s">"examples"</span><span class="p">][</span><span class="n">idx</span><span class="p">][</span><span class="s">"input_tensor"</span><span class="p">],</span>
+                                          <span class="s">"input"</span><span class="p">)</span>
+    
+    <span class="c1"># Convert each word in the sentence into an array of integers per char.
+</span>    <span class="n">char_inputs</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="p">.</span><span class="n">array_to_sentence</span><span class="p">(</span><span class="n">char_input</span><span class="p">,</span> <span class="s">"char"</span><span class="p">)</span> <span class="k">for</span> <span class="n">char_input</span> <span class="ow">in</span>
+                   <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="n">split</span><span class="p">][</span><span class="s">"examples"</span><span class="p">][</span><span class="n">idx</span><span class="p">][</span><span class="s">"char_input_tensor"</span><span class="p">]]</span>
+    <span class="n">target_tensor</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">array_to_sentence</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="n">split</span><span class="p">][</span><span class="s">"examples"</span><span class="p">][</span><span class="n">idx</span><span class="p">][</span><span class="s">"target_tensor"</span><span class="p">],</span>
+                                           <span class="s">"target"</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">input_tensor</span><span class="p">,</span> <span class="n">char_inputs</span><span class="p">,</span> <span class="n">target_tensor</span>
+
+  <span class="k">def</span> <span class="nf">print_example</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">split</span><span class="o">=</span><span class="s">"train"</span><span class="p">):</span>
+    <span class="n">input_tensor</span><span class="p">,</span> <span class="n">char_input_tensor</span><span class="p">,</span> <span class="n">target_tensor</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">get_example</span><span class="p">(</span><span class="n">idx</span><span class="p">,</span> <span class="n">split</span><span class="o">=</span><span class="n">split</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">" "</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">target_tensor</span><span class="p">))</span>
+    <span class="k">print</span><span class="p">(</span><span class="s">" "</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">input_tensor</span><span class="p">))</span>
+    <span class="k">for</span> <span class="n">char_input</span> <span class="ow">in</span> <span class="n">char_input_tensor</span><span class="p">:</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">" "</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">char_input</span><span class="p">),</span> <span class="n">end</span><span class="o">=</span><span class="s">''</span><span class="p">)</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">"    "</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s">''</span><span class="p">)</span>
+    <span class="k">print</span><span class="p">()</span>
+
+  <span class="k">def</span> <span class="nf">array_to_sentence</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sentence_array</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> 
+                        <span class="n">vocabulary</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="s">"""
+    Translate each integer in a sentence array to the corresponding word.
+    :param sentence_array: array with integers representing words from the vocabulary.
+    :param vocabulary: whether to use the input or target vocabulary.
+    :return: the sentence in words.
+    """</span>
+    <span class="n">vocab</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">get_vocabulary</span><span class="p">(</span><span class="n">vocabulary</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">vocab</span><span class="p">.</span><span class="n">idx_to_token</span><span class="p">(</span><span class="n">token_idx</span><span class="p">)</span> <span class="k">for</span> <span class="n">token_idx</span> <span class="ow">in</span> 
+            <span class="n">sentence_array</span><span class="p">.</span><span class="n">squeeze</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)]</span>
+
+  <span class="k">def</span> <span class="nf">shuffle_train_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="n">zipped_data</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"examples"</span><span class="p">],</span> 
+                           <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"example_lengths"</span><span class="p">],</span>
+                           <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"char_max_lengths"</span><span class="p">]))</span>
+    <span class="n">random</span><span class="p">.</span><span class="n">shuffle</span><span class="p">(</span><span class="n">zipped_data</span><span class="p">)</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"examples"</span><span class="p">],</span> <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"example_lengths"</span><span class="p">],</span> <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"char_max_lengths"</span><span class="p">]</span> <span class="o">=</span> <span class="nb">zip</span><span class="p">(</span><span class="o">*</span><span class="n">zipped_data</span><span class="p">)</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"examples"</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"examples"</span><span class="p">])</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"example_lengths"</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"example_lengths"</span><span class="p">])</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"char_max_lengths"</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="s">"train"</span><span class="p">][</span><span class="s">"char_max_lengths"</span><span class="p">])</span>
+
+  <span class="k">def</span> <span class="nf">print_batch</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch_tuple</span><span class="p">):</span>
+    <span class="n">input_tensors</span><span class="p">,</span> <span class="n">ex_lengths</span><span class="p">,</span> <span class="n">char_tensors</span><span class="p">,</span> <span class="n">char_lengths</span><span class="p">,</span> <span class="n">target_tensors</span> <span class="o">=</span> <span class="n">batch_tuple</span>
+    <span class="n">current_char_idx</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">input_tensor</span><span class="p">,</span> <span class="n">ex_length</span><span class="p">,</span> <span class="n">char_length</span><span class="p">,</span> <span class="n">target_tensor</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">input_tensors</span><span class="p">,</span> <span class="n">ex_lengths</span><span class="p">,</span> <span class="n">char_lengths</span><span class="p">,</span> <span class="n">target_tensors</span><span class="p">):</span>
+      <span class="n">char_tensor</span> <span class="o">=</span> <span class="n">char_tensors</span><span class="p">[</span><span class="n">current_char_idx</span><span class="p">:</span><span class="n">current_char_idx</span><span class="o">+</span><span class="n">ex_length</span><span class="p">]</span>
+      <span class="n">current_char_idx</span> <span class="o">+=</span> <span class="n">ex_length</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">"Example length %d"</span> <span class="o">%</span> <span class="n">ex_length</span><span class="p">)</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">"Input tensor: "</span><span class="p">,</span> <span class="n">input_tensor</span><span class="p">)</span>
+      <span class="n">input_sentence</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">array_to_sentence</span><span class="p">(</span><span class="n">input_tensor</span><span class="p">,</span> <span class="s">"input"</span><span class="p">)</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">"Input sentence: %s"</span> <span class="o">%</span> <span class="s">" "</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">input_sentence</span><span class="p">))</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">"Input sentence in chars: "</span><span class="p">)</span>
+      <span class="k">for</span> <span class="n">word</span><span class="p">,</span> <span class="n">char_length</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">char_tensor</span><span class="p">,</span> <span class="n">char_length</span><span class="p">):</span>
+        <span class="k">print</span><span class="p">(</span><span class="s">"Tensor: "</span><span class="p">,</span> <span class="n">word</span><span class="p">)</span>
+        <span class="k">print</span><span class="p">(</span><span class="s">"Word: %s "</span> <span class="o">%</span> <span class="bp">self</span><span class="p">.</span><span class="n">array_to_sentence</span><span class="p">(</span><span class="n">word</span><span class="p">,</span> <span class="s">"char"</span><span class="p">))</span>
+      <span class="k">print</span><span class="p">()</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">"Target tensor: "</span><span class="p">,</span> <span class="n">target_tensor</span><span class="p">)</span>
+      <span class="n">target_sentence</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">array_to_sentence</span><span class="p">(</span><span class="n">target_tensor</span><span class="p">,</span> <span class="s">"target"</span><span class="p">)</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">"Target sentence: %s"</span> <span class="o">%</span> <span class="s">" "</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">target_sentence</span><span class="p">))</span>
+
+  <span class="k">def</span> <span class="nf">get_batch</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">split</span><span class="o">=</span><span class="s">"train"</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span>
+                                             <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">]:</span>
+    <span class="s">"""
+    Combines `batch_size` input examples into a batch. Loops over all examples
+    in jumps of `batch_size`, and pads everything such that the batch becomes
+    of size: 
+    inputs: [batch_size, sequence_length, input_vocabulary_size]
+    characters: [batch_size, sequence_length, word_length, char_vocabulary_size]
+    targets: [batch_size, sequence_length, target_vocabulary_size]
+    """</span>
+    <span class="n">all_examples</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="n">split</span><span class="p">][</span><span class="s">"examples"</span><span class="p">]</span>
+    <span class="n">all_example_lengths</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="n">split</span><span class="p">][</span><span class="s">"example_lengths"</span><span class="p">]</span>
+    <span class="n">char_example_lengths</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">data</span><span class="p">[</span><span class="n">split</span><span class="p">][</span><span class="s">"char_max_lengths"</span><span class="p">]</span>
+
+    <span class="k">for</span> <span class="n">example_i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">all_examples</span><span class="p">),</span> <span class="n">batch_size</span><span class="p">):</span>
+
+      <span class="c1"># Select the examples, lengths, and max character lengths per sequence,
+</span>      <span class="n">examples</span> <span class="o">=</span> <span class="n">all_examples</span><span class="p">[</span><span class="n">example_i</span><span class="p">:</span><span class="n">example_i</span> <span class="o">+</span> <span class="n">batch_size</span><span class="p">]</span>
+      <span class="n">example_lengths</span> <span class="o">=</span> <span class="n">all_example_lengths</span><span class="p">[</span><span class="n">example_i</span><span class="p">:</span><span class="n">example_i</span> <span class="o">+</span> <span class="n">batch_size</span><span class="p">]</span>
+      <span class="n">char_max_lengths</span> <span class="o">=</span> <span class="n">char_example_lengths</span><span class="p">[</span><span class="n">example_i</span><span class="p">:</span><span class="n">example_i</span> <span class="o">+</span> <span class="n">batch_size</span><span class="p">]</span>
+
+      <span class="c1"># Sort them if the batch size is larger than 1.
+</span>      <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">example_lengths</span><span class="p">))</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">examples</span><span class="p">.</span><span class="n">sort</span><span class="p">(</span><span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="s">"input_tensor"</span><span class="p">][</span><span class="mi">0</span><span class="p">]))</span>
+        <span class="n">example_lengths</span><span class="p">,</span> <span class="n">char_max_lengths</span> <span class="o">=</span> <span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> 
+                                             <span class="nb">zip</span><span class="p">(</span><span class="o">*</span><span class="nb">sorted</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">example_lengths</span><span class="p">,</span> 
+                                                             <span class="n">char_max_lengths</span><span class="p">),</span>
+                                                         <span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">)))</span>
+      
+      <span class="c1"># We need to pad every example sequence to the max length of the batch.
+</span>      <span class="n">max_length</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="nb">max</span><span class="p">(</span><span class="n">example_lengths</span><span class="p">)</span>
+
+      <span class="c1"># We need to pad each character to the max number of characters of any
+</span>      <span class="c1"># word in the entire batch.
+</span>      <span class="n">max_char_length</span> <span class="o">=</span> <span class="n">np</span><span class="p">.</span><span class="nb">max</span><span class="p">(</span><span class="n">char_max_lengths</span><span class="p">)</span>
+
+      <span class="n">input_batch</span> <span class="o">=</span> <span class="p">[]</span>
+      <span class="n">char_lengths_batch</span> <span class="o">=</span> <span class="p">[]</span>
+      <span class="n">char_batch</span> <span class="o">=</span> <span class="p">[]</span>
+      <span class="n">target_batch</span> <span class="o">=</span> <span class="p">[]</span>
+      <span class="k">for</span> <span class="n">example</span> <span class="ow">in</span> <span class="n">examples</span><span class="p">:</span>
+          <span class="n">to_pad</span> <span class="o">=</span> <span class="n">max_length</span> <span class="o">-</span> <span class="n">example</span><span class="p">[</span><span class="s">"input_tensor"</span><span class="p">].</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+          <span class="c1"># Loop over the maximum number of words in the batch.
+</span>          <span class="n">padded_char_inputs</span> <span class="o">=</span> <span class="p">[]</span>
+          <span class="n">char_lengths</span> <span class="o">=</span> <span class="p">[]</span>
+          <span class="k">for</span> <span class="n">i_char_input</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">max_length</span><span class="p">):</span>
+
+            <span class="c1"># If we still have words for this example, get the word.
+</span>            <span class="k">if</span> <span class="n">i_char_input</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">example</span><span class="p">[</span><span class="s">"char_input_tensor"</span><span class="p">]):</span>
+              <span class="n">char_input</span> <span class="o">=</span> <span class="n">example</span><span class="p">[</span><span class="s">"char_input_tensor"</span><span class="p">][</span><span class="n">i_char_input</span><span class="p">]</span>
+            <span class="c1"># Else we add a padding word.
+</span>            <span class="k">else</span><span class="p">:</span>
+              <span class="n">char_input</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">max_char_length</span><span class="p">,</span> 
+                                       <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="p">.</span><span class="nb">long</span><span class="p">,</span>
+                                       <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">).</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            
+            <span class="c1"># Pad the character input
+</span>            <span class="n">to_pad_chars</span> <span class="o">=</span> <span class="n">max_char_length</span> <span class="o">-</span> <span class="n">char_input</span><span class="p">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">char_lengths</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">char_input</span><span class="p">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+            <span class="n">padded_char_input</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">cat</span><span class="p">([</span>
+              <span class="n">char_input</span><span class="p">,</span>
+              <span class="n">torch</span><span class="p">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">to_pad_chars</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="p">.</span><span class="nb">long</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">).</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">char_batch</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">padded_char_input</span><span class="p">)</span>
+          <span class="n">char_lengths_batch</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">char_lengths</span><span class="p">)</span>
+          
+          <span class="c1"># Pad input and target to the maximum sequence length in the batch.
+</span>          <span class="n">padded_input</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">cat</span><span class="p">([</span>
+              <span class="n">example</span><span class="p">[</span><span class="s">"input_tensor"</span><span class="p">],</span>
+              <span class="n">torch</span><span class="p">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">to_pad</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="p">.</span><span class="nb">long</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">).</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+          <span class="n">padded_target</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">cat</span><span class="p">([</span>
+              <span class="n">example</span><span class="p">[</span><span class="s">"target_tensor"</span><span class="p">],</span>
+              <span class="n">torch</span><span class="p">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">to_pad</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="p">.</span><span class="nb">long</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">).</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+          <span class="n">input_batch</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">padded_input</span><span class="p">)</span>
+          <span class="n">target_batch</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">padded_target</span><span class="p">)</span>
+      <span class="k">yield</span> <span class="p">(</span><span class="n">torch</span><span class="p">.</span><span class="n">cat</span><span class="p">(</span><span class="n">input_batch</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span> <span class="n">example_lengths</span><span class="p">,</span> 
+             <span class="n">torch</span><span class="p">.</span><span class="n">cat</span><span class="p">(</span><span class="n">char_batch</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span> <span class="n">char_lengths_batch</span><span class="p">,</span>
+             <span class="n">torch</span><span class="p">.</span><span class="n">cat</span><span class="p">(</span><span class="n">target_batch</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">))</span></code></pre></figure>
+
+<p>Let’s also adjust the <code class="language-plaintext highlighter-rouge">encoder</code> and <code class="language-plaintext highlighter-rouge">tagger</code> from part two to process the character sequences:</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">class</span> <span class="nc">Encoder</span><span class="p">(</span><span class="n">nn</span><span class="p">.</span><span class="n">Module</span><span class="p">):</span>
+  <span class="s">"""
+  A simple encoder model to encode sentences. Bi-LSTM over word embeddings.
+  """</span>
+  <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vocabulary_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">embedding_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+               <span class="n">char_vocabulary_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">char_embedding_dim</span><span class="p">,</span>
+               <span class="n">hidden_dimension</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">char_hidden_dimension</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+               <span class="n">padding_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+    <span class="nb">super</span><span class="p">(</span><span class="n">Encoder</span><span class="p">,</span> <span class="bp">self</span><span class="p">).</span><span class="n">__init__</span><span class="p">()</span>
+    <span class="c1"># The word embeddings.
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">embedding</span> <span class="o">=</span> <span class="n">nn</span><span class="p">.</span><span class="n">Embedding</span><span class="p">(</span><span class="n">num_embeddings</span><span class="o">=</span><span class="n">vocabulary_size</span><span class="p">,</span> 
+                                  <span class="n">embedding_dim</span><span class="o">=</span><span class="n">embedding_dim</span><span class="p">,</span>
+                                  <span class="n">padding_idx</span><span class="o">=</span><span class="n">padding_idx</span><span class="p">)</span>
+    
+    <span class="c1"># And the character embeddings.
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">char_embedding</span> <span class="o">=</span> <span class="n">nn</span><span class="p">.</span><span class="n">Embedding</span><span class="p">(</span><span class="n">num_embeddings</span><span class="o">=</span><span class="n">char_vocabulary_size</span><span class="p">,</span>
+                                       <span class="n">embedding_dim</span><span class="o">=</span><span class="n">char_embedding_dim</span><span class="p">,</span>
+                                       <span class="n">padding_idx</span><span class="o">=</span><span class="n">padding_idx</span><span class="p">)</span>
+    
+    <span class="c1"># The bi-LSTM.
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">bi_lstm</span> <span class="o">=</span> <span class="n">nn</span><span class="p">.</span><span class="n">LSTM</span><span class="p">(</span><span class="n">input_size</span><span class="o">=</span><span class="n">embedding_dim</span><span class="p">,</span> 
+                           <span class="n">hidden_size</span><span class="o">=</span><span class="n">hidden_dimension</span><span class="p">,</span> <span class="n">num_layers</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> 
+                           <span class="n">bias</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">bidirectional</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">batch_first</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+    
+    <span class="c1"># And a bi-LSTM to summarize character-based words, note that char_hidden_dimension must equal hidden_dimension.
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">char_lstm</span> <span class="o">=</span> <span class="n">nn</span><span class="p">.</span><span class="n">LSTM</span><span class="p">(</span><span class="n">input_size</span><span class="o">=</span><span class="n">char_embedding_dim</span><span class="p">,</span>
+                             <span class="n">hidden_size</span><span class="o">=</span><span class="n">char_hidden_dimension</span><span class="p">,</span>
+                             <span class="n">bias</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">bidirectional</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">batch_first</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+  
+  <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sentence</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">char_inputs</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">:</span>
+    <span class="s">"""
+    :param inputs: tuple with sentence at word level and char level
+                      of size [batch_size, sequence_length]
+    Returns: tensor of size [batch_size, sequence_length, hidden_size * 2] 
+    the hidden states of the biLSTM for each time step.
+    """</span>
+    <span class="c1"># sentence: [batch_size, sequence_length]
+</span>    <span class="c1"># char_inputs: [batch_size * sequence_length, word_lengths]
+</span>    <span class="n">num_words</span><span class="p">,</span> <span class="n">word_lengths</span> <span class="o">=</span> <span class="n">char_inputs</span><span class="p">.</span><span class="n">shape</span>
+    <span class="n">batch_size</span><span class="p">,</span> <span class="n">sequence_length</span> <span class="o">=</span> <span class="n">sentence</span><span class="p">.</span><span class="n">shape</span>
+
+    <span class="n">embedded_chars</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">char_embedding</span><span class="p">(</span><span class="n">char_inputs</span><span class="p">)</span>
+    <span class="c1"># embedded_chars: [batch_size * sequence_length, word_lengths, char_embedding_dim]
+</span>
+    <span class="n">_</span><span class="p">,</span> <span class="p">(</span><span class="n">hidden</span><span class="p">,</span> <span class="n">_</span><span class="p">)</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">char_lstm</span><span class="p">(</span><span class="n">embedded_chars</span><span class="p">)</span>
+    <span class="c1"># hidden: [batch_size * sequence_length, char_hidden_dimension]
+</span>    <span class="n">embedded_words</span> <span class="o">=</span> <span class="n">hidden</span><span class="p">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">sequence_length</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="n">embedded</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">embedding</span><span class="p">(</span><span class="n">sentence</span><span class="p">)</span>
+    <span class="c1"># embedded: [batch_size, sequence_length, embedding_dimension]
+</span>    
+    <span class="n">output</span><span class="p">,</span> <span class="p">(</span><span class="n">hidden</span><span class="p">,</span> <span class="n">cell</span><span class="p">)</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">bi_lstm</span><span class="p">(</span><span class="n">embedded</span><span class="p">)</span>
+    <span class="c1"># output: [batch_size, sequence_length, hidden_size * 2]
+</span>    <span class="c1"># hidden: [batch_size, hidden_size * 2]
+</span>    <span class="c1"># cell: [batch_size, hidden_size * 2]
+</span>
+    <span class="n">output</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">cat</span><span class="p">([</span><span class="n">output</span><span class="p">,</span> <span class="n">embedded_words</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">output</span></code></pre></figure>
+
+<p>And the <code class="language-plaintext highlighter-rouge">tagger</code>:</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">class</span> <span class="nc">Tagger</span><span class="p">(</span><span class="n">nn</span><span class="p">.</span><span class="n">Module</span><span class="p">):</span>
+  <span class="s">"""
+  A POS tagger.
+  """</span>
+  
+  <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_vocabulary</span><span class="p">:</span> <span class="n">Vocabulary</span><span class="p">,</span> 
+               <span class="n">char_vocabulary</span><span class="p">:</span> <span class="n">Vocabulary</span><span class="p">,</span>
+               <span class="n">target_vocabulary</span><span class="p">:</span> <span class="n">Vocabulary</span><span class="p">,</span>
+               <span class="n">embedding_dimension</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">char_embedding_dimension</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+               <span class="n">hidden_dimension</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">char_hidden_dimension</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+               <span class="n">crf</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>
+    <span class="nb">super</span><span class="p">(</span><span class="n">Tagger</span><span class="p">,</span> <span class="bp">self</span><span class="p">).</span><span class="n">__init__</span><span class="p">()</span>
+    <span class="c1"># The Encoder to extract features from the input sequence.
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">encoder</span> <span class="o">=</span> <span class="n">Encoder</span><span class="p">(</span><span class="n">vocabulary_size</span><span class="o">=</span><span class="n">input_vocabulary</span><span class="p">.</span><span class="n">size</span><span class="p">,</span> 
+                           <span class="n">char_vocabulary_size</span><span class="o">=</span><span class="n">char_vocabulary</span><span class="p">.</span><span class="n">size</span><span class="p">,</span>
+                           <span class="n">char_embedding_dim</span><span class="o">=</span><span class="n">char_embedding_dimension</span><span class="p">,</span>
+                           <span class="n">embedding_dim</span><span class="o">=</span><span class="n">embedding_dimension</span><span class="p">,</span> 
+                           <span class="n">hidden_dimension</span><span class="o">=</span><span class="n">hidden_dimension</span><span class="p">,</span> 
+                           <span class="n">char_hidden_dimension</span><span class="o">=</span><span class="n">char_hidden_dimension</span><span class="p">,</span>
+                           <span class="n">padding_idx</span><span class="o">=</span><span class="n">input_vocabulary</span><span class="p">.</span><span class="n">pad_idx</span><span class="p">)</span>
+    
+    <span class="c1"># The linear projection (with parameters W and b).  
+</span>    <span class="n">encoder_output_dim</span> <span class="o">=</span> <span class="n">hidden_dimension</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">+</span> <span class="n">char_hidden_dimension</span> <span class="o">*</span> <span class="mi">2</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">encoder_to_tags</span> <span class="o">=</span> <span class="n">nn</span><span class="p">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">encoder_output_dim</span><span class="p">,</span> 
+                                     <span class="n">target_vocabulary</span><span class="p">.</span><span class="n">size</span><span class="p">)</span>
+    
+    <span class="c1"># The linear-chain CRF.
+</span>    <span class="bp">self</span><span class="p">.</span><span class="n">crf</span> <span class="o">=</span> <span class="n">crf</span>
+    <span class="k">if</span> <span class="bp">self</span><span class="p">.</span><span class="n">crf</span><span class="p">:</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">tagger</span> <span class="o">=</span> <span class="n">ChainCRF</span><span class="p">(</span><span class="n">num_tags</span><span class="o">=</span><span class="n">target_vocabulary</span><span class="p">.</span><span class="n">size</span><span class="p">,</span> 
+                           <span class="n">tag_vocabulary</span><span class="o">=</span><span class="n">target_vocabulary</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">tagger</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">nn</span><span class="p">.</span><span class="n">Softmax</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+      <span class="bp">self</span><span class="p">.</span><span class="n">loss_fn</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">nn</span><span class="p">.</span><span class="n">CrossEntropyLoss</span><span class="p">()</span>
+  
+  <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_sequence</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
+              <span class="n">input_sequence_chars</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span>
+              <span class="n">target_sequence</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> 
+              <span class="n">input_mask</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">input_lengths</span><span class="p">:</span> <span class="n">torch</span><span class="p">.</span><span class="n">Tensor</span><span class="p">):</span>
+    <span class="s">"""
+    :param input_sequence: input sequence of size 
+            [batch_size, sequence_length, input_vocabulary_size]
+    :param input_sequence_chars: character-based input sequence of size 
+            [batch_size, sequence_length, word_length, char_input_vocab_size]
+    :param target_sequence: POS tags target, [batch_size, sequence_length]
+    :param input_mask: padding-mask, [batch_size, sequence_length]
+    :param input_lengths: lengths of each example in the batch [batch_size]
+    Returns: ...
+    """</span>
+    <span class="c1"># input_sequence: [batch_size, sequence_length, input_vocabulary_size]
+</span>    <span class="c1"># input_sequence_chars: [batch_size, sequence_length, word_length, 
+</span>    <span class="c1">#                        char_input_vocabulary_size]
+</span>    <span class="n">lstm_features</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">input_sequence</span><span class="p">,</span> <span class="n">input_sequence_chars</span><span class="p">)</span>
+    <span class="c1"># lstm_features: [batch_size, sequence_length, 
+</span>    <span class="c1">#                 hidden_dimension*2 + char_hidden_dimension*2]
+</span>    
+    <span class="n">crf_features</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">encoder_to_tags</span><span class="p">(</span><span class="n">lstm_features</span><span class="p">)</span>
+    <span class="c1"># crf_features: [batch_size, sequence_length, target_vocabulary_size]
+</span>    
+    <span class="k">if</span> <span class="bp">self</span><span class="p">.</span><span class="n">crf</span><span class="p">:</span>
+      <span class="n">loss</span><span class="p">,</span> <span class="n">scores</span><span class="p">,</span> <span class="n">tag_sequence</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">tagger</span><span class="p">(</span><span class="n">input_features</span><span class="o">=</span><span class="n">crf_features</span><span class="p">,</span>
+                                              <span class="n">target_tags</span><span class="o">=</span><span class="n">target_sequence</span><span class="p">,</span>
+                                              <span class="n">input_mask</span><span class="o">=</span><span class="n">input_mask</span><span class="p">,</span>
+                                              <span class="n">input_lengths</span><span class="o">=</span><span class="n">input_lengths</span><span class="p">)</span>
+      <span class="c1"># loss, score: scalars
+</span>      <span class="c1"># tag_sequence: [batch_size, sequence_length]
+</span>    <span class="k">else</span><span class="p">:</span>
+      <span class="n">batch_size</span><span class="p">,</span> <span class="n">sequence_length</span><span class="p">,</span> <span class="n">target_vocabulary_size</span> <span class="o">=</span> <span class="n">crf_features</span><span class="p">.</span><span class="n">shape</span>
+      <span class="n">scores</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">tagger</span><span class="p">(</span><span class="n">crf_features</span><span class="p">)</span>
+      <span class="n">loss</span> <span class="o">=</span> <span class="bp">self</span><span class="p">.</span><span class="n">loss_fn</span><span class="p">(</span><span class="n">scores</span><span class="p">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">batch_size</span> <span class="o">*</span> <span class="n">sequence_length</span><span class="p">,</span>
+                                         <span class="n">target_vocabulary_size</span><span class="p">),</span>
+                          <span class="n">target_sequence</span><span class="p">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">batch_size</span> <span class="o">*</span> <span class="n">sequence_length</span><span class="p">))</span>
+      <span class="n">tag_sequence</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">argmax</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">loss</span><span class="p">,</span> <span class="n">scores</span><span class="p">,</span> <span class="n">tag_sequence</span></code></pre></figure>
+
+<p>The most important class, the <code class="language-plaintext highlighter-rouge">ChainCRF</code>, hasn’t changed from part two!</p>
+
+<p>Now we’ll grab the UD dataset from the awesome
+<a href="https://pytorchnlp.readthedocs.io/en/latest/source/torchnlp.datasets.html" target="_blank">TorchNLP</a> library, which has been made <em>incredibly</em> easy:</p>
+
+<p><code class="language-plaintext highlighter-rouge">ud_dataset = ud_pos_dataset(train=True, test=True)</code></p>
+
+<p>Let’s pass the data we want to our <code class="language-plaintext highlighter-rouge">TaggingDataset</code> and look at some stats. Now <code class="language-plaintext highlighter-rouge">ud_dataset</code> holds the training and test
+set of Universal Dependencies, which are both lists of data points, where each data point is a dict with the <code class="language-plaintext highlighter-rouge">tokens</code> (AKA the input sequence),
+the <code class="language-plaintext highlighter-rouge">ud_tags</code> (the UPOS tags), and the <code class="language-plaintext highlighter-rouge">ptb_tags</code> (the Penn Treebank tags). For our class we need to put these in a list
+of tuples with the input sequence and target tags. We’ll choose as targets the <code class="language-plaintext highlighter-rouge">ud_tags</code>, since there are less classes for those
+than the Penn Treebank tags, and the task is a bit easier.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">training_data_ud</span> <span class="o">=</span> <span class="p">[(</span><span class="n">example</span><span class="p">[</span><span class="s">"tokens"</span><span class="p">],</span> <span class="n">example</span><span class="p">[</span><span class="s">"ud_tags"</span><span class="p">])</span> 
+                        <span class="k">for</span> <span class="n">example</span> <span class="ow">in</span> <span class="n">ud_dataset</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+<span class="n">test_data_ud</span> <span class="o">=</span> <span class="p">[(</span><span class="n">example</span><span class="p">[</span><span class="s">"tokens"</span><span class="p">],</span> <span class="n">example</span><span class="p">[</span><span class="s">"ud_tags"</span><span class="p">])</span> 
+                        <span class="k">for</span> <span class="n">example</span> <span class="ow">in</span> <span class="n">ud_dataset</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span>
+<span class="n">tagging_set</span> <span class="o">=</span> <span class="n">TaggingDataset</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">training_data_ud</span><span class="p">)</span>
+<span class="n">tagging_set</span><span class="p">.</span><span class="n">read_testset</span><span class="p">(</span><span class="n">test_data_ud</span><span class="p">)</span>
+<span class="n">tagging_set</span><span class="p">.</span><span class="n">print_stats</span><span class="p">()</span></code></pre></figure>
+
+<figure class="highlight"><pre><code class="language-terminal" data-lang="terminal"><span class="go">Number of train examples in dataset: 12543
+
+Input vocabulary size: 19674
+Most common input tokens:  [('.', 8640), ('the', 8152), (',', 7021), ('to', 5076), ('and', 4855)]
+
+Char vocabulary size: 110
+Most common input tokens:  [('e', 93412), ('t', 67775), ('a', 63699), ('o', 58826), ('n', 53490)]
+
+Target vocabulary size: 19
+Most common target tokens:  [('NOUN', 34781), ('PUNCT', 23679), ('VERB', 23081), ('PRON', 18577), ('ADP', 17638)]
+
+train example: 
+PROPN PUNCT PROPN PUNCT ADJ NOUN VERB PROPN PROPN PROPN PUNCT PROPN PUNCT DET NOUN ADP DET NOUN ADP DET NOUN ADP PROPN PUNCT ADP DET ADJ NOUN PUNCT
+Al - Zaman : American forces killed Shaikh Abdullah al - Ani , the preacher at the mosque in the town of Qaim , near the Syrian border .
+A l    -    Z a m a n    :    A m e r i c a n    f o r c e s    k i l l e d    S h a i k h    A b d u l l a h    a l    -    A n i    ,    t h e    p r e a c h e r    a t    t h e    m o s q u e    i n    t h e    t o w n    o f    Q a i m    ,    n e a r    t h e    S y r i a n    b o r d e r    .    
+
+
+Number of test examples in dataset: 2077
+
+Input vocabulary size: 19674
+Most common input tokens:  [('.', 8640), ('the', 8152), (',', 7021), ('to', 5076), ('and', 4855)]
+
+Char vocabulary size: 110
+Most common input tokens:  [('e', 93412), ('t', 67775), ('a', 63699), ('o', 58826), ('n', 53490)]
+
+Target vocabulary size: 19
+Most common target tokens:  [('NOUN', 34781), ('PUNCT', 23679), ('VERB', 23081), ('PRON', 18577), ('ADP', 17638)]
+
+test example: 
+PRON SCONJ PROPN VERB ADP PROPN PUNCT
+</span><span class="gp">What if Google &lt;UNK&gt;</span><span class="w"> </span>Into &lt;UNK&gt; ?
+<span class="go">W h a t    i f    G o o g l e    M o r p h e d    I n t o    G o o g l e O S    ?    </span></code></pre></figure>
+
+<p>As we can see above, we have <code class="language-plaintext highlighter-rouge">12543</code> training examples, <code class="language-plaintext highlighter-rouge">2077</code> testing examples, an input vocabulary of size <code class="language-plaintext highlighter-rouge">19674</code>,
+a character vocabulary of size <code class="language-plaintext highlighter-rouge">110</code>, and <code class="language-plaintext highlighter-rouge">19</code> possible POS tags.
+The most common input tokens are generally common tokens and their POS tags.</p>
+
+<p>In the printed test example “What if Google &lt;UNK&gt; Into &lt;UNK&gt;?” we encounter two unknown words, which are the words
+“Morphed” and “GoogleOS”, like we can see from the character representations. If we didn’t have those, the model wouldn’t have
+any information about these words and could only guess a tag based on the other words in the input sequence, the predicted tag before
+it if the CRF is used, and the average <code class="language-plaintext highlighter-rouge">&lt;UNK&gt;</code> embedding.</p>
+
+<h2 id="training--testing"><span style="color:#C0392B">Training &amp; Testing</span></h2>
+
+<p>We can now train our bi-LSTM-CRF on the Universal Dependencies training data! We’ll use Adam optimizer with parameters
+taken from <a href="https://arxiv.org/abs/1603.01354" target="_blank">Ma &amp; Hovy</a>.
+Below, each <code class="language-plaintext highlighter-rouge">epoch</code> loops over the entire dataset and puts each batch in the data through our model,
+calculating the loss and taking a gradient step for the batch.</p>
+
+<p>We’re going to choose a batch size of 100 as opposed to 10 in Ma &amp; Hovy, because we want to train a bit faster and don’t
+care too much about performance now. We anyway will never achieve the same performance as in Ma &amp; Hovy, because they
+use many more things that increase performance, most importantly probably a character-based CNN and pre-trained word embeddings.
+If we were to optimize for performance we would do many more things than discussed here, some of which we’ll briefly discuss
+below in the section Disclaimers.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">train</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="n">TaggingDataset</span><span class="p">,</span> <span class="n">model</span><span class="p">:</span> <span class="n">ChainCRF</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> 
+          <span class="n">num_epochs</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+  <span class="s">"""
+  :param data: a TaggingDataset filled with training data.
+  :param model: an initialized tagger model.
+  :param batch_size: a minibatch size.
+  :param num_epochs: how many times to go over the entire training data.
+  """</span>
+  <span class="n">trainable_parameters</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">model</span><span class="p">.</span><span class="n">parameters</span><span class="p">()</span> <span class="k">if</span> <span class="n">p</span><span class="p">.</span><span class="n">requires_grad</span><span class="p">]</span>
+  <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">optim</span><span class="p">.</span><span class="n">Adam</span><span class="p">(</span><span class="n">trainable_parameters</span><span class="p">,</span>
+                               <span class="n">lr</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">betas</span><span class="o">=</span><span class="p">(</span><span class="mf">0.9</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">))</span>
+  <span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_epochs</span><span class="p">):</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">epoch</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="mi">1</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">"Epoch %d"</span> <span class="o">%</span> <span class="p">(</span><span class="n">epoch</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+      <span class="k">print</span><span class="p">(</span><span class="s">"Epoch loss: "</span><span class="p">,</span> <span class="n">epoch_loss</span> <span class="o">/</span> <span class="n">num_iterations</span><span class="p">)</span>
+    <span class="n">epoch_loss</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">num_iterations</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">iteration</span><span class="p">,</span> <span class="p">(</span><span class="n">input_sequence</span><span class="p">,</span> <span class="n">example_lengths</span><span class="p">,</span> 
+                    <span class="n">char_input_sequence</span><span class="p">,</span> <span class="n">char_example_lengths</span><span class="p">,</span>
+                    <span class="n">target_sequence</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">get_batch</span><span class="p">(</span><span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span><span class="p">)):</span>
+      <span class="n">input_mask</span> <span class="o">=</span> <span class="p">(</span><span class="n">input_sequence</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">).</span><span class="nb">long</span><span class="p">()</span>
+      <span class="n">input_lengths</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">example_lengths</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+      <span class="n">batch_loss</span><span class="p">,</span> <span class="n">score</span><span class="p">,</span> <span class="n">output_tags</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">input_sequence</span><span class="o">=</span><span class="n">input_sequence</span><span class="p">,</span> 
+                                             <span class="n">input_sequence_chars</span><span class="o">=</span><span class="n">char_input_sequence</span><span class="p">,</span>
+                                             <span class="n">target_sequence</span><span class="o">=</span><span class="n">target_sequence</span><span class="p">,</span> 
+                                             <span class="n">input_mask</span><span class="o">=</span><span class="n">input_mask</span><span class="p">,</span>
+                                             <span class="n">input_lengths</span><span class="o">=</span><span class="n">input_lengths</span><span class="p">)</span>
+      <span class="n">loss</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">mean</span><span class="p">(</span><span class="n">batch_loss</span><span class="p">)</span>
+      <span class="n">loss</span><span class="p">.</span><span class="n">backward</span><span class="p">()</span>
+      <span class="n">optimizer</span><span class="p">.</span><span class="n">step</span><span class="p">()</span>
+      <span class="n">optimizer</span><span class="p">.</span><span class="n">zero_grad</span><span class="p">()</span>
+      <span class="n">epoch_loss</span> <span class="o">+=</span> <span class="n">loss</span><span class="p">.</span><span class="n">item</span><span class="p">()</span>
+      <span class="n">num_iterations</span> <span class="o">+=</span> <span class="mi">1</span></code></pre></figure>
+
+<p>We will also implement the testing loop so below we can immediately test our trained model on the unseen data.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">test</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="n">TaggingDataset</span><span class="p">,</span> <span class="n">model</span><span class="p">:</span> <span class="n">ChainCRF</span><span class="p">):</span>
+  <span class="s">"""
+  Loops over the test data in `data`, calculates the best scoring
+  tag sequence according to the trained `model` for each example,
+  and returns the sequences, predictions, and the accuries for
+  all examples.
+  :param data: An instance of TaggingDataset containing test data.
+  :param model: A (trained) ChainCRF.
+  
+  Returns: a tuple of inputs, targets, predicted targets, accuracies, 
+            and mean accuracy.
+  """</span>
+  <span class="n">input_sequences</span> <span class="o">=</span> <span class="p">[]</span>
+  <span class="n">target_sequences</span> <span class="o">=</span> <span class="p">[]</span>
+  <span class="n">decoded_tags</span> <span class="o">=</span> <span class="p">[]</span>
+  <span class="n">accuracies</span> <span class="o">=</span> <span class="p">[]</span>
+  <span class="n">total_accs</span> <span class="o">=</span> <span class="mi">0</span>
+  <span class="n">n_examples</span> <span class="o">=</span> <span class="mi">0</span>
+  <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">input_sequence</span><span class="p">,</span> <span class="n">example_lengths</span><span class="p">,</span> 
+          <span class="n">char_input_sequence</span><span class="p">,</span> <span class="n">char_example_lengths</span><span class="p">,</span>
+          <span class="n">target_sequence</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">get_batch</span><span class="p">(</span><span class="n">batch_size</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">split</span><span class="o">=</span><span class="s">"test"</span><span class="p">)):</span>
+      <span class="c1"># Save the sequences in string-form instead of numerical form.
+</span>      <span class="n">input_sequences</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">array_to_sentence</span><span class="p">(</span><span class="n">input_sequence</span><span class="p">,</span> <span class="s">"input"</span><span class="p">))</span>
+      <span class="n">target_sequences</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">array_to_sentence</span><span class="p">(</span><span class="n">target_sequence</span><span class="p">,</span> <span class="s">"target"</span><span class="p">))</span>
+      <span class="n">input_mask</span> <span class="o">=</span> <span class="p">(</span><span class="n">input_sequence</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">).</span><span class="nb">long</span><span class="p">()</span>
+      <span class="n">input_lengths</span> <span class="o">=</span> <span class="n">torch</span><span class="p">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">example_lengths</span><span class="p">))</span>
+      
+      <span class="c1"># Get the predicted output sequence of tags.
+</span>      <span class="n">batch_loss</span><span class="p">,</span> <span class="n">score</span><span class="p">,</span> <span class="n">output_tags</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">input_sequence</span><span class="o">=</span><span class="n">input_sequence</span><span class="p">,</span> 
+                                             <span class="n">input_sequence_chars</span><span class="o">=</span><span class="n">char_input_sequence</span><span class="p">,</span>
+                                             <span class="n">target_sequence</span><span class="o">=</span><span class="n">target_sequence</span><span class="p">,</span> 
+                                             <span class="n">input_mask</span><span class="o">=</span><span class="n">input_mask</span><span class="p">,</span>
+                                             <span class="n">input_lengths</span><span class="o">=</span><span class="n">input_lengths</span><span class="p">)</span>
+      
+      <span class="c1"># Calculate the accuracy and save it.
+</span>      <span class="n">target_sequence</span> <span class="o">=</span> <span class="n">target_sequence</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+      <span class="n">accuracy</span> <span class="o">=</span> <span class="p">(</span><span class="n">target_sequence</span> 
+                   <span class="o">==</span> <span class="n">output_tags</span><span class="p">[</span><span class="mi">0</span><span class="p">]).</span><span class="nb">long</span><span class="p">().</span><span class="nb">sum</span><span class="p">().</span><span class="nb">float</span><span class="p">()</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">output_tags</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+      <span class="n">accuracies</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">accuracy</span><span class="p">.</span><span class="n">item</span><span class="p">())</span>
+      <span class="n">total_accs</span> <span class="o">+=</span> <span class="n">accuracy</span><span class="p">.</span><span class="n">item</span><span class="p">()</span>
+      <span class="n">n_examples</span> <span class="o">+=</span> <span class="mi">1</span>
+      <span class="n">decoded_tags</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">array_to_sentence</span><span class="p">(</span><span class="n">output_tags</span><span class="p">,</span> <span class="s">"target"</span><span class="p">))</span>
+  <span class="n">mean_acc</span> <span class="o">=</span> <span class="n">total_accs</span> <span class="o">/</span> <span class="n">n_examples</span>
+  <span class="k">return</span> <span class="n">input_sequences</span><span class="p">,</span> <span class="n">target_sequences</span><span class="p">,</span> <span class="n">decoded_tags</span><span class="p">,</span> <span class="n">accuracies</span><span class="p">,</span> <span class="n">mean_acc</span></code></pre></figure>
+
+<p>Allright, now let’s initialize our model and train it for 15 epochs. First, let’s train a simple bi-LSTM, without
+using the CRF.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">model</span> <span class="o">=</span> <span class="n">Tagger</span><span class="p">(</span><span class="n">input_vocabulary</span><span class="o">=</span><span class="n">tagging_set</span><span class="p">.</span><span class="n">get_vocabulary</span><span class="p">(</span><span class="s">"input"</span><span class="p">),</span>
+               <span class="n">target_vocabulary</span><span class="o">=</span><span class="n">tagging_set</span><span class="p">.</span><span class="n">get_vocabulary</span><span class="p">(</span><span class="s">"target"</span><span class="p">),</span>
+               <span class="n">char_vocabulary</span><span class="o">=</span><span class="n">tagging_set</span><span class="p">.</span><span class="n">get_vocabulary</span><span class="p">(</span><span class="s">"char"</span><span class="p">),</span>
+               <span class="n">embedding_dimension</span><span class="o">=</span><span class="mi">128</span><span class="p">,</span>
+               <span class="n">char_embedding_dimension</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>
+               <span class="n">char_hidden_dimension</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> 
+               <span class="n">hidden_dimension</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+               <span class="n">crf</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+<span class="n">model</span><span class="p">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+<span class="n">train</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">tagging_set</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">num_epochs</span><span class="o">=</span><span class="mi">15</span><span class="p">)</span></code></pre></figure>
+
+<figure class="highlight"><pre><code class="language-terminal" data-lang="terminal"><span class="go">Epoch 1
+Trained for 126 iterations.
+Epoch loss:  2.177231947580973
+Epoch 2
+Trained for 126 iterations.
+Epoch loss:  2.109471258662996
+Epoch 3
+Trained for 126 iterations.
+Epoch loss:  2.1045296589533486
+Epoch 4
+Trained for 126 iterations.
+Epoch loss:  2.087123019354684
+Epoch 5
+Trained for 126 iterations.
+Epoch loss:  2.0774436413295687
+Epoch 6
+Trained for 126 iterations.
+Epoch loss:  2.0735075284564304
+Epoch 7
+Trained for 126 iterations.
+Epoch loss:  2.0646931557428267
+Epoch 8
+Trained for 126 iterations.
+Epoch loss:  2.0587902144780235
+Epoch 9
+Trained for 126 iterations.
+Epoch loss:  2.0560855203204684
+Epoch 10
+Trained for 126 iterations.
+Epoch loss:  2.0547851891744706
+Epoch 11
+Trained for 126 iterations.
+Epoch loss:  2.0541635732802135
+Epoch 12
+Trained for 126 iterations.
+Epoch loss:  2.0540022339139665
+Epoch 13
+Trained for 126 iterations.
+Epoch loss:  2.053600659446111
+Epoch 14
+Trained for 126 iterations.
+Epoch loss:  2.0533236397637262
+Epoch 15
+Trained for 126 iterations.
+Epoch loss:  2.0526692545603193</span></code></pre></figure>
+
+<p>The training of 15 epochs using a GPU in Google Colab takes about 10 minutes. The loss seems to steadily go down each epoch (although not a lot). We can test our model on the test data of the UD dataset and have
+a look at the mean accuracy per example. The accuracy for one example is calculated (above in the test loop) as:</p>
+
+\[\text{acc} = \frac{1}{m}\sum_{t=1}^{m} \mathbb{1}(\hat{y}_t, y_t)\]
+
+<p>Where \(\mathbb{1}(\hat{y}_t, y_t)\) denotes the indicator function that equals 1 if the current predicted tag \(\hat{y}_t\) equals
+the ground-truth target tag \(y_t\)
+and 0 otherwise. The mean accuracy is then the mean of this metric over the entire testset.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">inputs</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">predictions</span><span class="p">,</span> <span class="n">accs</span><span class="p">,</span> <span class="n">mean_acc</span> <span class="o">=</span> <span class="n">test</span><span class="p">(</span><span class="n">tagging_set</span><span class="p">,</span> <span class="n">model</span><span class="p">)</span>
+<span class="k">print</span><span class="p">(</span><span class="n">mean_acc</span><span class="p">)</span></code></pre></figure>
+
+<figure class="highlight"><pre><code class="language-terminal" data-lang="terminal"><span class="go">0.89</span></code></pre></figure>
+
+<p>So without the CRF, we already get a mean accuracy of 89%. That’s pretty good. Let’s see what we can do with the CRF enabled.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">crf_model</span> <span class="o">=</span> <span class="n">Tagger</span><span class="p">(</span><span class="n">input_vocabulary</span><span class="o">=</span><span class="n">tagging_set</span><span class="p">.</span><span class="n">get_vocabulary</span><span class="p">(</span><span class="s">"input"</span><span class="p">),</span>
+                   <span class="n">target_vocabulary</span><span class="o">=</span><span class="n">tagging_set</span><span class="p">.</span><span class="n">get_vocabulary</span><span class="p">(</span><span class="s">"target"</span><span class="p">),</span>
+                   <span class="n">char_vocabulary</span><span class="o">=</span><span class="n">tagging_set</span><span class="p">.</span><span class="n">get_vocabulary</span><span class="p">(</span><span class="s">"char"</span><span class="p">),</span>
+                   <span class="n">embedding_dimension</span><span class="o">=</span><span class="mi">128</span><span class="p">,</span>
+                   <span class="n">char_embedding_dimension</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>
+                   <span class="n">char_hidden_dimension</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> 
+                   <span class="n">hidden_dimension</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+                   <span class="n">crf</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+<span class="n">model</span><span class="p">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+<span class="n">train</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">tagging_set</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="n">crf_model</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">num_epochs</span><span class="o">=</span><span class="mi">15</span><span class="p">)</span></code></pre></figure>
+
+<figure class="highlight"><pre><code class="language-terminal" data-lang="terminal"><span class="go">Epoch 1
+Trained for 126 iterations.
+Epoch loss:  9.147202217389667
+Epoch 2
+Trained for 126 iterations.
+Epoch loss:  2.6090604748044695
+Epoch 3
+Trained for 126 iterations.
+Epoch loss:  1.0739414606775557
+Epoch 4
+Trained for 126 iterations.
+Epoch loss:  0.5113307234077227
+Epoch 5
+Trained for 126 iterations.
+Epoch loss:  0.24992894984426953
+Epoch 6
+Trained for 126 iterations.
+Epoch loss:  0.11944707252439998
+Epoch 7
+Trained for 126 iterations.
+Epoch loss:  0.058415038792032095
+Epoch 8
+Trained for 126 iterations.
+Epoch loss:  0.02836258260030595
+Epoch 9
+Trained for 126 iterations.
+Epoch loss:  0.016542019189468453
+Epoch 10
+Trained for 126 iterations.
+Epoch loss:  0.011555857158132963
+Epoch 11
+Trained for 126 iterations.
+Epoch loss:  0.009479762773798217
+Epoch 12
+Trained for 126 iterations.
+Epoch loss:  0.0074993557710614465
+Epoch 13
+Trained for 126 iterations.
+Epoch loss:  0.006215568138508215
+Epoch 14
+Trained for 126 iterations.
+Epoch loss:  0.006054751822606675
+Epoch 15
+Trained for 126 iterations.
+Epoch loss:  0.005618702975981351</span></code></pre></figure>
+
+<p>The training time is now rather about 20 minutes, but the loss goes down much more during the epochs here. Do note however that we cannot compare the values of the loss
+between this model and the one without the CRF; they are using completely different loss functions. Let’s look at
+the accuracy we get now.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">crf_inputs</span><span class="p">,</span> <span class="n">crf_targets</span><span class="p">,</span> <span class="n">crf_predictions</span><span class="p">,</span> <span class="n">crf_accs</span><span class="p">,</span> <span class="n">crf_mean_acc</span> <span class="o">=</span> <span class="n">test</span><span class="p">(</span><span class="n">tagging_set</span><span class="p">,</span> 
+                                                                        <span class="n">crf_model</span><span class="p">)</span>
+<span class="k">print</span><span class="p">(</span><span class="n">crf_mean_acc</span><span class="p">)</span></code></pre></figure>
+
+<figure class="highlight"><pre><code class="language-terminal" data-lang="terminal"><span class="go">0.94</span></code></pre></figure>
+
+<p>That’s a pretty significant improvement! It seems like this test data can benefit from assuming dependencies in the
+output sequence, which makes sense for the POS tagging task, as motivated before, helping for ambiguous words like “book” for example.</p>
+
+<p>Let’s look some predictions of both models. Below a quick function to print some different examples.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">print_predicted_examples</span><span class="p">(</span><span class="n">idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+  <span class="k">print</span><span class="p">(</span><span class="s">"bi-LSTM outputs:"</span><span class="p">)</span>
+  <span class="k">print</span><span class="p">(</span><span class="s">"      Input sequence: "</span> <span class="o">+</span> <span class="s">' '</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">inputs</span><span class="p">[</span><span class="n">idx</span><span class="p">]))</span>
+  <span class="k">print</span><span class="p">(</span><span class="s">"     Target sequence: "</span> <span class="o">+</span> <span class="s">' '</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">targets</span><span class="p">[</span><span class="n">idx</span><span class="p">]))</span>
+  <span class="k">print</span><span class="p">(</span><span class="s">"Predictions sequence: "</span> <span class="o">+</span> <span class="s">' '</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">predictions</span><span class="p">[</span><span class="n">idx</span><span class="p">]))</span>
+  <span class="k">print</span><span class="p">(</span><span class="s">"Accuracy: "</span><span class="p">,</span> <span class="n">accs</span><span class="p">[</span><span class="n">idx</span><span class="p">])</span>
+  <span class="k">print</span><span class="p">()</span>
+
+  <span class="k">print</span><span class="p">(</span><span class="s">"bi-LSTM-CRF outputs:"</span><span class="p">)</span>
+  <span class="k">print</span><span class="p">(</span><span class="s">"      Input sequence: "</span> <span class="o">+</span> <span class="s">' '</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">crf_inputs</span><span class="p">[</span><span class="n">idx</span><span class="p">]))</span>
+  <span class="k">print</span><span class="p">(</span><span class="s">"     Target sequence: "</span> <span class="o">+</span> <span class="s">' '</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">crf_targets</span><span class="p">[</span><span class="n">idx</span><span class="p">]))</span>
+  <span class="k">print</span><span class="p">(</span><span class="s">"Predictions sequence: "</span> <span class="o">+</span> <span class="s">' '</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="n">crf_predictions</span><span class="p">[</span><span class="n">idx</span><span class="p">]))</span>
+  <span class="k">print</span><span class="p">(</span><span class="s">"Accuracy: "</span><span class="p">,</span> <span class="n">crf_accs</span><span class="p">[</span><span class="n">idx</span><span class="p">])</span>
+  <span class="k">print</span><span class="p">()</span></code></pre></figure>
+
+<p>Let’s print examples at index 1 and 2.</p>
+
+<figure class="highlight"><pre><code class="language-terminal" data-lang="terminal"><span class="go">bi-LSTM outputs:
+</span><span class="gp">      Input sequence: [ via Microsoft Watch from Mary &lt;UNK&gt;</span><span class="w"> </span>&lt;UNK&gt; <span class="o">]</span>
+<span class="go">     Target sequence: PUNCT ADP PROPN PROPN ADP PROPN PROPN PROPN PUNCT
+Predictions sequence: PUNCT ADP PROPN VERB ADP PROPN PROPN NOUN PUNCT
+Accuracy:  0.86
+
+bi-LSTM-CRF outputs:
+</span><span class="gp">      Input sequence: [ via Microsoft Watch from Mary &lt;UNK&gt;</span><span class="w"> </span>&lt;UNK&gt; <span class="o">]</span>
+<span class="go">     Target sequence: PUNCT ADP PROPN PROPN ADP PROPN PROPN PROPN PUNCT
+Predictions sequence: PUNCT ADP PROPN VERB ADP PROPN PROPN VERB PUNCT
+Accuracy:  0.86</span></code></pre></figure>
+
+<p>This example shows the benefits of the character model. Even though the sentence contains test words that are unknown because
+they didn’t occur during training, the character model managed to predict the right tag for one of the unknown words.</p>
+
+<figure class="highlight"><pre><code class="language-terminal" data-lang="terminal"><span class="go">bi-LSTM outputs:
+      Input sequence: They own blogger , of course .
+     Target sequence: PRON VERB PROPN PUNCT ADV ADV PUNCT
+Predictions sequence: PRON VERB ADJ PUNCT ADP NOUN PUNCT
+Accuracy:  0.57
+
+bi-LSTM-CRF outputs:
+      Input sequence: They own blogger , of course .
+     Target sequence: PRON VERB PROPN PUNCT ADV ADV PUNCT
+Predictions sequence: PRON ADJ VERB PUNCT ADV ADV PUNCT
+Accuracy:  0.71</span></code></pre></figure>
+
+<p>This example shows the power of the CRF. For the last words, “of course”, the bi-LSTM model fails to see the
+connection between “of” and “course” and between the tag “ADV” following “ADV” in that case, whereas the CRF handles
+this situation correctly. There are many more examples like this where the CRF properly disambiguates words. Check it out
+for yourself in <a href="todo: insert github link" target="_blank">the Google Colab</a>!</p>
+
+<h1 id="conclusion"><span style="color:#C0392B">Conclusion</span></h1>
+
+<p>We’re done! We derived, implemented, and trained a linear-chain CRF, showing that is gets significantly higher
+test accuracy for a real-world dataset than a simple biLSTM model.</p>
+
+<h1 id="disclaimers"><span style="color:#C0392B">Disclaimers</span></h1>
+
+<p>There are many things that are actually good practice in deep learning, or things that might
+ improve performance, that we didn’t do here. For example, for every epoch we looped over that data in the same order,
+ making it not really SGD. We didn’t optimize at all for hyperparameters and randomly chose some things.
+Dropout, learning rate decay, pre-trained embedings, etc.</p>
+
+<h1 id="sources"><span style="color:#2874A6">Sources</span></h1>
+
+<p>Natalia Silveira and Timothy Dozat and Marie-Catherine de Marneffe and Samuel Bowman and
+    Miriam Connor and John Bauer and Christopher D. Manning (2014).
+    <a href="https://www.aclweb.org/anthology/L14-1067/" target="_blank"><em>A Gold Standard Dependency Corpus for English</em></a></p>
+:ET

@@ -1,3 +1,4 @@
+@charset "UTF-8";
 /** Reset some basic elements */
 body, h1, h2, h3, h4, h5, h6, p, blockquote, pre, hr, dl, dd, ol, ul, figure { margin: 0; padding: 0; }
 
@@ -69,7 +70,7 @@ table { margin-bottom: 30px; width: 100%; text-align: left; color: #3f3f3f; bord
 
 table tr:nth-child(even) { background-color: #f7f7f7; }
 
-table th, table td { padding: 10px 15px; }
+table th, table td { padding: 9.999999999px 15px; }
 
 table th { background-color: #f0f0f0; border: 1px solid #dedede; border-bottom-color: #c9c9c9; }
 
@@ -92,7 +93,7 @@ table td { border: 1px solid #e8e8e8; }
 
 .site-nav .page-link:not(:last-child) { margin-right: 20px; }
 
-@media screen and (max-width: 600px) { .site-nav { position: absolute; top: 9px; right: 15px; background-color: #fdfdfd; border: 1px solid #e8e8e8; border-radius: 5px; text-align: right; } .site-nav label[for="nav-trigger"] { display: block; float: right; width: 36px; height: 36px; z-index: 2; cursor: pointer; } .site-nav .menu-icon { display: block; float: right; width: 36px; height: 26px; line-height: 0; padding-top: 10px; text-align: center; } .site-nav .menu-icon > svg { fill: #424242; } .site-nav input ~ .trigger { clear: both; display: none; } .site-nav input:checked ~ .trigger { display: block; padding-bottom: 5px; } .site-nav .page-link { display: block; padding: 5px 10px; margin-left: 20px; } .site-nav .page-link:not(:last-child) { margin-right: 0; } }
+@media screen and (max-width: 600px) { .site-nav { position: absolute; top: 9px; right: 15px; background-color: #fdfdfd; border: 1px solid #e8e8e8; border-radius: 5px; text-align: right; } .site-nav label[for="nav-trigger"] { display: block; float: right; width: 36px; height: 36px; z-index: 2; cursor: pointer; } .site-nav .menu-icon { display: block; float: right; width: 36px; height: 26px; line-height: 0; padding-top: 10px; text-align: center; } .site-nav .menu-icon > svg { fill: #424242; } .site-nav input ~ .trigger { clear: both; display: none; } .site-nav input:checked ~ .trigger { display: block; padding-bottom: 5px; } .site-nav .page-link { display: block; margin-left: 20px; padding: 5px 10px; } .site-nav .page-link:not(:last-child) { margin-right: 0; } }
 
 /** Site footer */
 .site-footer { border-top: 1px solid #e8e8e8; padding: 30px 0; }
@@ -273,5 +274,36 @@ table td { border: 1px solid #e8e8e8; }
 .highlight .vi { color: #008080; }
 
 .highlight .il { color: #099; }
+
+/* Title styling for subtle look above the callout with zero spacing */
+article .callout-title { font-weight: bold; color: #444; /* Dark gray for subtle effect */ font-size: 1em; /* Slightly smaller font size */ display: inline-block; padding-left: 3px; /* Optional: slight indent for alignment */ margin: 0; /* Remove any margins */ padding-bottom: 2px; /* Slight padding for a bit of space */ }
+
+/* Basic callout styling */
+article .callout-title { font-weight: bold; color: #C0392B; /* Dark gray for subtle effect */ font-size: 1em; /* Slightly smaller font size */ margin: 0; /* Remove any margin */ padding: 0 0 0px 0px; /* Minimal bottom padding for spacing */ display: block; /* Ensure it's above the callout */ padding-left: 3px; }
+
+/* General callout styling */
+article .callout { padding: 15px; margin: 0px 0 20px 0; /* Only add bottom margin for space below the callout */ border-radius: 5px; background-color: #FFF1F3; }
+
+/* Callout types */
+.callout-hypothesis { border-left: 5px solid #C0392B; padding: 15px; margin-top: 1px; border-radius: 5px; background-color: #fce2df; /* Soft blue background */ font-family: Arial, sans-serif; /* Optional: change font for callouts */ }
+
+.callout-info { border-left: 4px solid #C0392B; padding: 15px; margin: 20px 0; background-color: #fce2df; /* Soft blue background */ font-family: Arial, sans-serif; /* Optional: change font for callouts */ }
+
+.callout-rq { border-left: 5px solid #C0392B; padding: 15px; margin: 20px 0; border-radius: 5px; background-color: #fce2df; /* Soft blue background */ font-family: Arial, sans-serif; /* Optional: change font for callouts */ }
+
+.callout-warning { border-left-color: #FFA500; background-color: #fff8e1; }
+
+.callout-error { border-left-color: #E53E3E; background-color: #ffe5e5; }
+
+/* Optional: add an icon */
+.callout-hypothesis::before { content: " "; font-weight: bold; }
+
+.callout-info::before { content: " "; font-weight: bold; }
+
+.callout-rq::before { content: " "; font-weight: bold; }
+
+.callout-warning::before { content: "⚠️ "; font-weight: bold; }
+
+.callout-error::before { content: "❌ "; font-weight: bold; }
 
 /*# sourceMappingURL=main.css.map */

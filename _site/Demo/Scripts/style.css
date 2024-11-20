@@ -1,0 +1,95 @@
+/**
+ * Name: Laura Ruis
+ * Student number: 10158006
+ * Assignment: Linked Views, week 6/7
+ */
+
+/* style all text elements on page */
+text {
+    fill: #656677;
+}
+
+/* style title */
+.page-header {
+    float: top;
+    color: #656677;
+}
+
+/* style ticks from line chart */
+.ticks {
+    font: 10px sans-serif;
+}
+
+/* style slider */
+.border,
+.inside,
+.outside {
+    stroke-linecap: round;
+}
+.border {
+    stroke: #656677;
+    stroke-opacity: 0.5;
+    stroke-width: 10px;
+}
+.inside {
+    stroke: #ddd;
+    stroke-width: 8px;
+}
+.outside {
+    pointer-events: stroke;
+    stroke-width: 50px;
+    stroke: transparent;
+    cursor: crosshair;
+}
+.handle {
+    fill: #fff;
+    stroke: #656677;
+    stroke-width: 1px;
+}
+
+/* style map*/
+#charts {
+    float: right;
+}
+.boundary {
+    fill: none;
+    stroke: #a5967e;
+}
+
+/* style titles */
+.page-header.text-center.sub-header {
+    font: 24px sans-serif;
+    border-width: 3px;
+    border-color: #d3d3d3;
+}
+
+/* style line from line chart */
+.line {
+    fill: none;
+    stroke-width: 2px;
+}
+
+/* style table */
+#table {
+    float: left;
+    width: 50%;
+    color: #656677;
+}
+td {
+    width: 10%;
+}
+#smallLabel {
+    font: 10px Arial;
+    fill: #656677;
+}
+
+/* style axis */
+.axis text {
+    font: 10px sans-serif;
+}
+.axis line,
+.axis path {
+    fill: none;
+    stroke: #000;
+    shape-rendering: crispEdges;
+}
