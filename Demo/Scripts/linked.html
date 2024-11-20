@@ -22,9 +22,45 @@
     <div id="titleContainer"></div>
     <div id="superContainer">
         <!-- Put some information above the table -->
-        <div class="container" id="info"></div>
-        <div class="container" id="charts"></div>
-        <div class="container" id="table"></div>
+        <div class="container" id="info">
+            <p>
+                <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#collapse1" aria-expanded="false" aria-controls="collapse1">
+                  How to use this demo
+                </button>
+                <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#collapse2" aria-expanded="false" aria-controls="collapse2">
+                    Query set colors and indices
+                </button>
+              </p>
+              <div class="collapse" id="collapse1">
+                <div class="card card-body">
+                    To load the influences for a query, click on a query in one of the left two tables (7B or 35B). <br>
+
+                    To see the most relevant documents, click on the query and sort from high to low influence score. <br>
+                    
+                    To expand the document text and see all 512 tokens, click on it. <br><br>
+
+                    For example: <br>
+                    Click on query idx 0 for the 7B and sort by rank. <br>
+                    Or click on query idx 35 for the 35B and sort by rank. <br><br>
+
+                    We are working on more data! Stay tuned. <br>
+                </div>
+              </div>
+              <div class="collapse" id="collapse2">
+                <div class="card card-body">
+                  <h5 style="color: rgb(161, 137, 197);">Factual: 0 - 39</h5>   
+                  <h5 style="color: rgb(110, 149, 148);">Reasoning - Arithmetic (7B only): 40 - 59</h5>  
+                  <h5 style="color: rgb(110, 149, 148);">Reasoning - Linear (35B only): 40 - 59</h5>  
+                  <h5 style="color: rgb(110, 149, 148);">Reasoning - Slopes: 60 - 79</h5>  
+                  <h5 style="color: rgb(245, 212, 95);">Factual control: 80 - 89</h5>  
+                  <h5 style="color: rgb(255, 172, 114);">Reasoning control: 90 - 99</h5>    
+                </div>
+              </div>
+        </div>
+            <div class="container" id="charts">
+                <h3>Queries</h3>
+            </div>
+            <div class="container" id="table"><h3>Documents</h3></div>
     </div>
 </body>
 </html>
