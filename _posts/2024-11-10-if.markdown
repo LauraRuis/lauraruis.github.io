@@ -13,7 +13,7 @@ hidden: true
 
 <span style="color:#C0392B">Paper</span>. <a href="https://arxiv.org/abs/2411.12580" target="_blank">ArXiv</a>
 
-<span style="color:#C0392B">Demo</span>. <a href="https://lauraruis.github.io/Demo/Scripts/linked.html" target="_blank">Coming soon: top and bottom 20 documents per query</a>
+<span style="color:#C0392B">Demo</span>. <a href="https://lauraruis.github.io/Demo/Scripts/linked.html" target="_blank">Coming soon: some of the top and bottom documents per query</a>
 
 <span style="color:#C0392B">Supplement</span>. <a href="https://drive.google.com/drive/folders/1JExnAUsSzII2KUo5OcMYFWCHeVPXfddS?usp=sharing" target="_blank">Supplement</a>
 
@@ -316,7 +316,7 @@ In the qualitative section of the findings, we will look into the following ques
 - If not, how otherwise are the documents related to the query? What kind of data is influential for the generated reasoning traces? ([Finding 4](#how-are-the-top-most-influential-documents-related-to-the-reasoning-queries))
 - Which pretraining data sources are overrepresented with respect to the training distribution in the most positively and negatively influential data? ([Finding 5](#what-are-the-most-influential-pretraining-data-sources))
 
-Again, I will discuss main findings, and then provide a deep-dive section for each. These deep-dives will contain a lot of pretraining datapoints, like those with the answers to factual questions and reasoning questions, and we will additionally refer to the demo where readers can look through the top and bottom 20 most influential sequences for each query independently.
+Again, I will discuss main findings, and then provide a deep-dive section for each. These deep-dives will contain a lot of pretraining datapoints, like those with the answers to factual questions and reasoning questions, and we will additionally refer to the demo where readers can look through some of the top and bottom most influential sequences for each query independently.
 
 #### <span style="color:#C0392B">Do models rely on the answers to reasoning questions?</span>
 
@@ -341,7 +341,7 @@ In the deep-dive below, we look at the documents that contain answers for factua
 <summary><span style="color:#C0392B; font-size:17px"><strong>Deep-dive into finding 3 (click to view)</strong></span></summary>
 <br>
 
-To get some more qualitative insight into how answers show up, in this section we highlight some examples. We share all documents with answers in the supplemental material, and they can be found in the demo as well.
+To get some more qualitative insight into how answers show up, in this section we highlight some examples. We share some documents with answers in the supplemental material, and they can be found in the demo as well.
 
 For factual questions, it happens quite often that the answer to the question shows up as highly influential in multiple documents in the top 10. For example, for the factual question <em>"What is the tallest mountain in the world and how tall is it?"</em>, the answer shows up at ranks 1, 4, 6, and 7. The document at rank 1 (the most positively influential one), is the following (we underlined the answer in the document):
 <br>
@@ -386,7 +386,7 @@ Apart from one, for none of the other arithmetic queries answers to reasoning st
 </div>
 
 
-The crosslingual transfer finding is underexplored here, because the only cases we find are through keyword search (which has happened by chance, because generally keywords are translated differently). Nonetheless, we show an example of crosslingual transfer here. Some others are shown in Appendix A.8.2 of the paper, and all can be found in the demo or supplement.
+The crosslingual transfer finding is underexplored here, because the only cases we find are through keyword search (which has happened by chance, because generally keywords are translated differently). Nonetheless, we show an example of crosslingual transfer here. Some others are shown in Appendix A.8.2 of the paper.
 <br>
 
 <img src="/images/eu_top_16_pt.png" alt="" style="width: 70%; height: 70%;" class="center"/>
