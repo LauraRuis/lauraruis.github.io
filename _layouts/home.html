@@ -1,0 +1,89 @@
+---
+layout: base
+---
+
+<div class="home">
+  {%- if page.title -%}
+    <h1 class="page-heading">{{ page.title }}</h1>
+  {%- endif -%}
+  
+  <img src="images/laura.jpg" alt="Laura Ruis" style="width:200px;height:200px;float:left;margin-right:15px;">
+
+  Hi! My name is Laura and I am a PhD student in the UCL DARK lab. I'm broadly interested in language for AI. To what extent can language models understand language like humans can? How do they attain their downstream capabilities? How can we further exploit the rich signal that language affords?
+
+  <!-- Use image as link -->
+   <br><br><br><br><br>
+    <a href="https://scholar.google.com/citations?user=k0vrm6kAAAAJ&hl=en" target="_blank">
+        Google Scholar
+    </a>
+     / 
+    <a href="https://github.com/LauraRuis" target="_blank">
+        GitHub
+    </a>
+     / 
+    <a href="https://x.com/lauraruis" target="_blank">
+        X
+    </a>
+    / 
+    <a href="https://bsky.app/profile/lauraruis.bsky.social" target="_blank">
+        Bluesky
+    </a>
+
+
+  <!-- add image float left -->
+   <br><br>
+
+   <!-- header with blog -->
+    <h2>Blogposts</h2>
+  {{ content }}
+
+
+  {% if site.paginate %}
+    {% assign posts = paginator.posts %}
+  {% else %}
+    {% assign posts = site.posts %}
+  {% endif %}
+
+
+  {%- if posts.size > 0 -%}
+    {%- if page.list_title -%}
+      <h2 class="post-list-heading">{{ page.list_title }}</h2>
+    {%- endif -%}
+    <ul class="post-list">
+      {%- assign date_format = site.minima.date_format | default: "%b %-d, %Y" -%}
+      {%- for post in posts -%}
+      <li>
+        <span class="post-meta">{{ post.date | date: date_format }}</span>
+        <h3>
+          <a class="post-link" href="{{ post.url | relative_url }}">
+            {{ post.title | escape }}
+          </a>
+        </h3>
+        {%- if site.show_excerpts -%}
+          {{ post.excerpt }}
+        {%- endif -%}
+      </li>
+      {%- endfor -%}
+    </ul>
+
+    {% if site.paginate %}
+      <div class="pager">
+        <ul class="pagination">
+        {%- if paginator.previous_page %}
+          <li><a href="{{ paginator.previous_page_path | relative_url }}" class="previous-page">{{ paginator.previous_page }}</a></li>
+        {%- else %}
+          <li><div class="pager-edge">•</div></li>
+        {%- endif %}
+          <li><div class="current-page">{{ paginator.page }}</div></li>
+        {%- if paginator.next_page %}
+          <li><a href="{{ paginator.next_page_path | relative_url }}" class="next-page">{{ paginator.next_page }}</a></li>
+        {%- else %}
+          <li><div class="pager-edge">•</div></li>
+        {%- endif %}
+        </ul>
+      </div>
+    {%- endif %}
+
+  {%- endif -%}
+
+</div>
