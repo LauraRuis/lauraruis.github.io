@@ -13,7 +13,7 @@ hidden: true
 
 <span style="color:#C0392B">Paper</span>. <a href="https://arxiv.org/abs/2411.12580" target="_blank">ArXiv</a>
 
-<span style="color:#C0392B">Demo</span>. <a href="https://lauraruis.github.io/Demo/Scripts/linked.html" target="_blank">Coming soon: some of the top and bottom documents per query</a>
+<span style="color:#C0392B">Demo</span>. <a href="https://lauraruis.github.io/Demo/Scripts/linked.html" target="_blank">Some of the top and bottom documents per query</a>
 
 <span style="color:#C0392B">Supplement</span>. <a href="https://drive.google.com/drive/folders/1JExnAUsSzII2KUo5OcMYFWCHeVPXfddS?usp=sharing" target="_blank">Supplement</a>
 
