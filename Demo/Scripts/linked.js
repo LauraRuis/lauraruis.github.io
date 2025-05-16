@@ -90,7 +90,6 @@ window.onload = function() {
                     }
                     queries[model].push({"id": i, "fullText": query, "shortText": shortenedQuery, "example_id": item});
                     var influencesQuery = json["influences_cos"][i];
-                    console.log(influencesQuery);
                     var ranksQuery = json["ranks_normed"][i];
                     influencesPerQuery[model].push(influencesQuery);
                     ranksPerQuery[model].push(ranksQuery);
@@ -265,6 +264,7 @@ window.onload = function() {
                             value = parseInt(rank);
                         } else {
                             value = parseFloat(influence_score);
+                            console.log(value);
                         };
                         
                         // var value = (i % 2) === 0 ? row.value.shortText : parseFloat(influence_score);
