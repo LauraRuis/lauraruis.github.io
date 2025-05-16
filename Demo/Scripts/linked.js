@@ -12,7 +12,9 @@ window.onload = function() {
     // array of filenames that contain the data
     const filenames = [
         "https://raw.githubusercontent.com/LauraRuis/lauraruis.github.io/refs/heads/master/Demo/Data/answer_and_slope_pretraining_data_prepared_35B.json",
-        "https://raw.githubusercontent.com/LauraRuis/lauraruis.github.io/refs/heads/master/Demo/Data/answer_and_slope_pretraining_data_prepared_7B.json"];
+        "https://raw.githubusercontent.com/LauraRuis/lauraruis.github.io/refs/heads/master/Demo/Data/answer_and_slope_pretraining_data_prepared_7B.json",
+        "https://raw.githubusercontent.com/LauraRuis/lauraruis.github.io/refs/heads/master/Demo/Data/if_top_bottom_data_prepared_35B.json",
+        "https://raw.githubusercontent.com/LauraRuis/lauraruis.github.io/refs/heads/master/Demo/Data/if_top_bottom_data_prepared_7B.json"];
 
         var defaultColor = d3.rgb("#d4d4d4");
 
