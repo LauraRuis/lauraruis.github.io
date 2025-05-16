@@ -263,6 +263,7 @@ window.onload = function() {
                         } else if (i === 2) { // Replace 'someOtherCondition' with your second condition
                             value = parseInt(rank);
                         } else {
+                            console.log(influence_score);
                             value = parseFloat(influence_score);
                             console.log(value);
                         };
