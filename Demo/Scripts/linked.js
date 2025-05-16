@@ -90,6 +90,7 @@ window.onload = function() {
                     }
                     queries[model].push({"id": i, "fullText": query, "shortText": shortenedQuery, "example_id": item});
                     var influencesQuery = json["influences_cos"][i];
+                    console.log(influencesQuery);
                     var ranksQuery = json["ranks_normed"][i];
                     influencesPerQuery[model].push(influencesQuery);
                     ranksPerQuery[model].push(ranksQuery);
