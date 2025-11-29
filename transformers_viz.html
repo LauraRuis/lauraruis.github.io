@@ -1792,7 +1792,7 @@ Q.grad = attn_scores.grad @ K`
     'Value gradient. Weighted by attention weights.',
     `<span class="r">∂ℒ/∂V</span> = <span class="a">α</span><sup>T</sup> · <span class="r">∂ℒ/∂h</span>`,
     `∂ℒ/∂V: [4, 512]`,
-    `V.grad = attn_weights.T @ head_out.grad` a
+    `V.grad = attn_weights.T @ head_out.grad`
 ),
 'grad-X-history': () => makeInfo(
     '∂ℒ/∂X (History)',
