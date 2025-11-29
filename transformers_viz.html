@@ -1,0 +1,2683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer Forward Pass Visualization</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #0a0a0f;
+            --bg-surface: #12121a;
+            --bg-elevated: #1a1a24;
+            --bg-solid: #0d0d12;
+            
+            --weights-color: #f59e0b;
+            --weights-bg: rgba(245, 158, 11, 0.15);
+            
+            --activations-color: #3b82f6;
+            --activations-bg: rgba(59, 130, 246, 0.15);
+            
+            --residual-color: #10b981;
+            
+            --nonlinear-color: #ef4444;
+            --linear-color: #6b7280;
+            
+            --head-color: #8b5cf6;
+            --head-bg: rgba(139, 92, 246, 0.15);
+            --loss-color: #f43f5e;
+            --loss-bg: rgba(244, 63, 94, 0.15);
+
+            --gradient-color: #ec4899;
+            --gradient-bg: rgba(236, 72, 153, 0.15);
+            
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            
+            --border-subtle: rgba(255, 255, 255, 0.08);
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        .page-layout { display: flex; min-height: 100vh; }
+        
+        .main-content {
+            flex: 1;
+            padding: 32px;
+            padding-right: 420px;
+            transition: padding-right 0.3s ease;
+        }
+        
+        body.simple-mode .main-content {
+            padding-right: 32px;
+        }
+        
+        /* Sidebar */
+        .equation-sidebar {
+            width: 400px;
+            background: var(--bg-surface);
+            border-left: 1px solid var(--border-subtle);
+            padding: 16px;
+            position: fixed;
+            right: 0;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+        }
+        
+        body.simple-mode .equation-sidebar {
+            transform: translateX(100%);
+        }
+        
+        .equation-sidebar h3 {
+            font-family: 'Source Serif 4', serif;
+            font-size: 1rem;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 8px;
+        }
+        
+        .sidebar-type {
+            font-size: 0.5rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        
+        .sidebar-type.weight { background: var(--weights-bg); color: var(--weights-color); }
+        .sidebar-type.activation { background: var(--activations-bg); color: var(--activations-color); }
+        .sidebar-type.head { background: var(--head-bg); color: var(--head-color); }
+        .sidebar-type.nonlinear { background: rgba(239, 68, 68, 0.2); color: var(--nonlinear-color); }
+        .sidebar-type.flow { background: rgba(16, 185, 129, 0.2); color: var(--residual-color); }
+        
+        .sidebar-section {
+            margin-bottom: 12px;
+            padding: 10px;
+            background: var(--bg-deep);
+            border-radius: 5px;
+            border-left: 3px solid var(--text-muted);
+        }
+        
+        .sidebar-section.eq { border-left-color: var(--activations-color); }
+        .sidebar-section.dim { border-left-color: var(--weights-color); }
+        .sidebar-section.code { border-left-color: var(--residual-color); }
+        
+        .section-label {
+            font-size: 0.5rem;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .section-content {
+            font-size: 0.7rem;
+            color: var(--text-primary);
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+        
+        .section-content .w { color: var(--weights-color); }
+        .section-content .a { color: var(--activations-color); }
+        .section-content .nl { color: var(--nonlinear-color); }
+        .section-content .h { color: var(--head-color); }
+        .section-content .r { color: var(--residual-color); }
+        .section-content .cm { color: var(--text-muted); }
+        .section-content .hl { background: rgba(16, 185, 129, 0.2); }
+        
+        .sidebar-desc {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            margin-bottom: 10px;
+        }
+        
+        header { text-align: center; margin-bottom: 20px; }
+        
+        h1 {
+            font-family: 'Source Serif 4', serif;
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        
+        .subtitle { color: var(--text-secondary); font-size: 0.65rem; }
+        
+        /* Toggle switch */
+        .mode-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        
+        .mode-toggle label {
+            font-size: 0.6rem;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+        
+        .mode-toggle label.active {
+            color: var(--text-primary);
+        }
+        
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 22px;
+            background: var(--bg-elevated);
+            border-radius: 11px;
+            cursor: pointer;
+            border: 1px solid var(--border-subtle);
+            transition: background 0.2s;
+        }
+        
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: var(--activations-color);
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+        
+        body.simple-mode .toggle-switch:not(.backward)::after {
+            transform: translateX(22px);
+            background: var(--residual-color);
+        }
+        
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 14px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            transition: opacity 0.3s;
+        }
+        
+        body.simple-mode .legend {
+            opacity: 0;
+            height: 0;
+            margin: 0;
+            overflow: hidden;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.55rem;
+            color: var(--text-secondary);
+        }
+        
+        .legend-1d { width: 6px; height: 14px; border-radius: 2px; background: var(--activations-color); }
+        .legend-2d { width: 14px; height: 14px; border-radius: 2px; background: var(--weights-color); }
+        .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+        .legend-dot.residual { background: var(--residual-color); }
+        .legend-dot.nonlinear { background: var(--nonlinear-color); }
+        
+        .clickable { cursor: pointer; transition: all 0.15s ease; }
+        .clickable:hover { filter: brightness(1.2); }
+        .clickable.selected { box-shadow: 0 0 0 2px var(--text-primary); }
+        
+        body.simple-mode .clickable { cursor: default; }
+        body.simple-mode .clickable:hover { filter: none; }
+        body.simple-mode .clickable.selected { box-shadow: none; }
+        
+        /* Tokens */
+        .tokens-section { margin-bottom: 14px; }
+        .tokens-label {
+            text-align: center;
+            font-size: 0.5rem;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        .tokens-row { display: flex; justify-content: center; gap: 6px; }
+        .token-box {
+            background: var(--bg-solid);
+            border: 2px solid var(--activations-color);
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 0.7rem;
+            color: var(--activations-color);
+            position: relative;
+        }
+        .token-box.active {
+            background: var(--activations-color);
+            color: var(--bg-deep);
+        }
+        .token-box.faded { opacity: 0.6; }
+        .token-box.faded:hover { opacity: 1; }
+        .token-label {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.45rem;
+            color: var(--text-muted);
+        }
+        .token-dim {
+            position: absolute;
+            bottom: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.4rem;
+            color: var(--text-muted);
+        }
+        
+        body.simple-mode .token-label,
+        body.simple-mode .token-dim {
+            display: none;
+        }
+        
+        /* Layout */
+        .viz-wrapper {
+            position: relative;
+            display: grid;
+            grid-template-columns: 1fr 110px 1fr;
+            padding: 14px 0;
+        }
+        
+        .left-column { display: flex; flex-direction: column; align-items: flex-end; padding-right: 14px; }
+        .center-column { position: relative; display: flex; flex-direction: column; align-items: center; }
+        .right-column { display: flex; flex-direction: column; align-items: flex-start; padding-left: 14px; }
+
+        body.simple-mode .right-column {
+            margin-top: 145px;  /* Push MLP down to align with residual arrows */
+        }
+        
+        .residual-stream {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 4px;
+            height: 100%;
+            background: var(--residual-color);
+            opacity: 0.2;
+            top: 0;
+            z-index: 0;
+            border-radius: 2px;
+        }
+        
+        .residual-node {
+            background: var(--bg-solid);
+            border: 2px solid var(--activations-color);
+            border-radius: 5px;
+            padding: 8px 14px;
+            position: relative;
+            z-index: 2;
+            text-align: center;
+        }
+        .residual-node .label { font-size: 0.5rem; color: var(--text-muted); margin-bottom: 2px; text-transform: uppercase; }
+        .residual-node .value { font-size: 0.7rem; color: var(--activations-color); }
+        .dim-annotation { font-size: 0.45rem; color: var(--text-muted); margin-top: 2px; }
+        
+        body.simple-mode .residual-node .value,
+        body.simple-mode .dim-annotation {
+            display: none;
+        }
+        
+        body.simple-mode .residual-node {
+            padding: 6px 12px;
+        }
+        
+        .layernorm-node {
+            background: var(--bg-solid);
+            border: 1px dashed var(--text-muted);
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 0.55rem;
+            color: var(--text-muted);
+            z-index: 2;
+        }
+        
+        body.simple-mode .layernorm-node {
+            opacity: 0.5;
+            font-size: 0.45rem;
+            padding: 2px 6px;
+        }
+        
+        .add-node {
+            background: var(--bg-solid);
+            border: 2px solid var(--residual-color);
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            color: var(--residual-color);
+            z-index: 2;
+            position: relative;
+        }
+        .add-node-label { position: absolute; font-size: 0.4rem; color: var(--text-muted); white-space: nowrap; }
+        .add-node-label.left { right: 32px; }
+        .add-node-label.right { left: 32px; }
+        
+        body.simple-mode .add-node-label { display: none; }
+        
+        .center-spacer { height: 40px; position: relative; z-index: 1; width: 100%; display: flex; align-items: center; justify-content: center; }
+        .center-spacer.tall { height: 70px; }
+        .center-spacer.short { height: 25px; }
+        .center-spacer.xtall { height: 140px; }
+        
+        body.simple-mode .center-spacer { height: 25px; }
+        body.simple-mode .center-spacer.tall { height: 45px; }
+        body.simple-mode .center-spacer.xtall { height: 90px; }
+        
+        .v-arrow { width: 2px; height: 100%; background: var(--text-muted); position: relative; }
+        .v-arrow::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: -3px;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid var(--text-muted);
+        }
+        
+        /* Blocks */
+        .processing-block {
+            background: var(--bg-solid);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: 10px 12px;
+            width: 100%;
+            max-width: 480px;
+            transition: all 0.3s ease;
+        }
+        
+        body.simple-mode .processing-block {
+            max-width: 280px;
+            padding: 12px;
+        }
+        
+        .block-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .block-title { font-size: 0.7rem; font-weight: 600; }
+        .block-tags { display: flex; gap: 3px; }
+        .block-tag {
+            font-size: 0.4rem;
+            padding: 2px 4px;
+            border-radius: 2px;
+            text-transform: uppercase;
+        }
+        .block-tag.nonlinear { background: rgba(239, 68, 68, 0.2); color: var(--nonlinear-color); }
+        .block-tag.linear { background: rgba(107, 114, 128, 0.2); color: var(--linear-color); }
+        
+        /* Detail elements - hidden in simple mode */
+        .detail-view {
+            transition: opacity 0.3s, max-height 0.3s;
+        }
+        
+        body.simple-mode .detail-view {
+            display: none;
+        }
+        
+        /* Simple mode flow elements */
+        .simple-view {
+            display: none;
+        }
+        
+        body.simple-mode .simple-view {
+            display: block;
+        }
+        
+        /* Simple mode MHA */
+        .simple-mha {
+            text-align: center;
+        }
+        
+        .simple-mha-flow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0;
+        }
+        
+        .simple-stage {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 0.55rem;
+            width: 100%;
+        }
+        
+        .simple-stage.input {
+            background: var(--activations-bg);
+            border: 1px solid var(--activations-color);
+            color: var(--activations-color);
+        }
+        
+        .simple-stage.heads {
+            background: var(--head-bg);
+            border: 1px solid var(--head-color);
+            color: var(--head-color);
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .simple-stage.heads .head-row {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .simple-stage.heads .mini-head {
+            width: 20px;
+            height: 20px;
+            background: var(--bg-solid);
+            border: 1px solid var(--head-color);
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.4rem;
+            position: relative;
+        }
+        
+        .simple-stage.heads .mini-head::after {
+            content: 'σ';
+            position: absolute;
+            top: -4px;
+            right: -2px;
+            font-size: 0.35rem;
+            color: var(--nonlinear-color);
+        }
+        
+        .simple-stage.output {
+            background: var(--weights-bg);
+            border: 1px solid var(--weights-color);
+            color: var(--weights-color);
+        }
+        
+        .simple-arrow {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+        }
+        
+        .simple-label {
+            font-size: 0.45rem;
+            color: var(--text-muted);
+        }
+        
+        /* Simple mode MLP */
+        .simple-mlp-flow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px 0;
+        }
+        
+        .simple-mlp-stage {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+        }
+        
+        .simple-mlp-bar {
+            border-radius: 3px;
+            transition: all 0.2s;
+        }
+        
+        .simple-mlp-bar.narrow {
+            width: 12px;
+            height: 36px;
+            background: var(--activations-bg);
+            border: 1.5px solid var(--activations-color);
+        }
+        
+        .simple-mlp-bar.wide {
+            width: 36px;
+            height: 36px;
+            background: var(--activations-bg);
+            border: 1.5px solid var(--activations-color);
+        }
+        
+        .simple-mlp-op {
+            font-size: 0.5rem;
+            color: var(--text-muted);
+            padding: 2px 4px;
+        }
+        
+        .simple-mlp-op.nonlinear {
+            color: var(--nonlinear-color);
+            background: rgba(239, 68, 68, 0.1);
+            border-radius: 2px;
+        }
+        
+        /* Tensors */
+        .matrix-flow { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+        .tensor-container { display: flex; flex-direction: column; align-items: center; }
+        .tensor-dim { font-size: 0.38rem; color: var(--text-muted); margin-bottom: 1px; white-space: nowrap; }
+        
+        .tensor-1d {
+            width: 11px;
+            height: 28px;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.45rem;
+            font-weight: 500;
+            writing-mode: vertical-rl;
+            background: var(--activations-bg);
+            border: 1.5px solid var(--activations-color);
+            color: var(--activations-color);
+        }
+        .tensor-1d.small { height: 22px; width: 9px; font-size: 0.4rem; }
+        
+        .tensor-2d {
+            width: 32px;
+            height: 32px;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.5rem;
+            font-weight: 500;
+            background: var(--weights-bg);
+            border: 1.5px solid var(--weights-color);
+            color: var(--weights-color);
+        }
+        .tensor-2d.small { width: 26px; height: 26px; font-size: 0.45rem; }
+        .tensor-2d.activation { background: var(--activations-bg); border-color: var(--activations-color); color: var(--activations-color); }
+        
+        .op-symbol { font-size: 0.65rem; color: var(--text-muted); padding: 0 1px; }
+        .op-symbol.nonlinear { color: var(--nonlinear-color); }
+        .flow-arrow { color: var(--text-muted); font-size: 0.7rem; }
+        
+        .component-label { font-size: 0.45rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+        .component-section { margin-bottom: 8px; padding: 6px; background: var(--bg-elevated); border-radius: 3px; }
+        
+        .prev-tokens-feed { display: flex; align-items: center; gap: 2px; margin-bottom: 6px; padding: 4px; background: var(--bg-elevated); border-radius: 3px; flex-wrap: wrap; }
+        .mini-token { background: var(--activations-bg); border: 1px solid var(--activations-color); border-radius: 2px; padding: 1px 4px; font-size: 0.45rem; color: var(--activations-color); }
+        .feed-label { font-size: 0.4rem; color: var(--text-muted); margin-left: 3px; }
+        
+        /* Arrows */
+        .connection-row { display: flex; align-items: center; justify-content: center; height: 28px; width: 100%; position: relative; z-index: 2; }
+        .left-connection { position: absolute; right: 50%; display: flex; align-items: center; padding-right: 5px; }
+        .right-connection { position: absolute; left: 50%; display: flex; align-items: center; padding-left: 5px; }
+        
+        .h-arrow { width: 45px; height: 14px; background: transparent; position: relative; display: flex; align-items: center; }
+        .h-arrow::before { content: ''; position: absolute; width: 100%; height: 2px; background: var(--text-muted); }
+        .h-arrow:hover::before { background: var(--text-primary); }
+        .h-arrow.to-left .arrow-head { position: absolute; left: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-right: 5px solid var(--text-muted); }
+        .h-arrow.to-right .arrow-head { position: absolute; right: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 5px solid var(--text-muted); }
+        .h-arrow.return::before { background: var(--residual-color); }
+        .h-arrow.return .arrow-head { border-right-color: var(--residual-color); border-left-color: var(--residual-color); }
+        
+        body.simple-mode .h-arrow:hover::before { background: var(--text-muted); }
+        body.simple-mode .h-arrow.return:hover::before { background: var(--residual-color); }
+        
+        .arrow-label { font-size: 0.38rem; color: var(--text-muted); position: absolute; top: -11px; white-space: nowrap; }
+        .dropout-label { font-size: 0.38rem; color: var(--text-muted); background: var(--bg-elevated); padding: 1px 3px; border-radius: 2px; margin: 0 3px; }
+        
+        body.simple-mode .arrow-label,
+        body.simple-mode .dropout-label {
+            display: none;
+        }
+        
+        .spacer-block { height: 35px; }
+        .spacer-block.tall { height: 70px; }
+        .spacer-block.xtall { height: 140px; }
+        .spacer-block.short { height: 18px; }
+        
+        body.simple-mode .spacer-block { height: 20px; }
+        body.simple-mode .spacer-block.tall { height: 45px; }
+        body.simple-mode .spacer-block.xtall { height: 90px; }
+        
+        /* MHA detail styles */
+        .qkv-projections { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-subtle); }
+        .qkv-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
+        .qkv-item { background: var(--bg-elevated); border-radius: 3px; padding: 5px; text-align: center; }
+        .qkv-item .component-label { margin-bottom: 4px; }
+        .qkv-item .matrix-flow { justify-content: center; }
+        .qkv-outputs { display: flex; justify-content: center; gap: 20px; margin-top: 8px; }
+        
+        .split-arrows-container { position: relative; height: 40px; margin: 5px 0; }
+        .split-arrows-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; }
+        .split-arrow-line { stroke: var(--head-color); stroke-width: 1.5; fill: none; opacity: 0.6; }
+        .split-arrow-head { fill: var(--head-color); opacity: 0.6; }
+        .split-label { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 0.4rem; color: var(--head-color); background: var(--bg-solid); padding: 2px 5px; border-radius: 2px; white-space: nowrap; }
+        
+        .heads-section { background: var(--bg-elevated); border-radius: 5px; padding: 8px; margin-bottom: 8px; }
+        .heads-title { font-size: 0.45rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; text-align: center; }
+        .heads-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+        
+        .head-box {
+            background: var(--bg-solid);
+            border: 1.5px solid var(--head-color);
+            border-radius: 3px;
+            padding: 6px 3px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        .head-box:hover { background: var(--head-bg); }
+        .head-box.expanded { grid-column: 1 / -1; padding: 10px; background: var(--head-bg); }
+        .head-number { font-size: 0.5rem; font-weight: 600; color: var(--head-color); }
+        .head-slice { font-size: 0.38rem; color: var(--text-muted); margin-top: 1px; }
+        .head-output { font-size: 0.38rem; color: var(--activations-color); margin-top: 2px; }
+        .head-tag { position: absolute; top: 1px; right: 1px; font-size: 0.32rem; padding: 1px 2px; border-radius: 1px; background: rgba(239, 68, 68, 0.2); color: var(--nonlinear-color); }
+        
+        .head-details { display: none; margin-top: 8px; text-align: left; }
+        .head-box.expanded .head-details { display: block; }
+        .head-box.expanded .head-slice, .head-box.expanded .head-output { display: none; }
+        .head-box.expanded .head-number { text-align: left; margin-bottom: 6px; padding-bottom: 5px; border-bottom: 1px solid var(--border-subtle); }
+        
+        .concat-arrows-container { position: relative; height: 35px; margin: 5px 0; }
+        .output-section { padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+        
+        .info-hint { text-align: center; font-size: 0.5rem; color: var(--text-muted); margin-top: 14px; padding: 6px; background: var(--bg-surface); border-radius: 4px; }
+        
+        body.simple-mode .info-hint { display: none; }
+
+        /* Backward mode */
+        .backward-section {
+            display: none;
+            margin-top: 20px;
+        }
+
+        body.backward-mode .backward-section {
+            display: block;
+        }
+
+        .loss-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .loss-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .label-token {
+            background: var(--bg-solid);
+            border: 2px solid var(--loss-color);
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 0.7rem;
+            color: var(--loss-color);
+            position: relative;
+        }
+
+        .label-token .token-label {
+            color: var(--loss-color);
+        }
+
+        .loss-node {
+            background: var(--loss-bg);
+            border: 2px solid var(--loss-color);
+            border-radius: 6px;
+            padding: 10px 16px;
+            text-align: center;
+        }
+
+        .loss-node .label {
+            font-size: 0.5rem;
+            color: var(--loss-color);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .loss-node .value {
+            font-size: 0.8rem;
+            color: var(--loss-color);
+            font-weight: 600;
+        }
+
+        .loss-node .formula {
+            font-size: 0.5rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .loss-arrow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .loss-arrow .arrow-line {
+            width: 2px;
+            height: 30px;
+            background: var(--loss-color);
+        }
+
+        .loss-arrow .arrow-head {
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 6px solid var(--loss-color);
+        }
+
+        .loss-arrow-label {
+            font-size: 0.45rem;
+            color: var(--loss-color);
+        }
+
+        .logits-node {
+            background: var(--bg-solid);
+            border: 2px solid var(--activations-color);
+            border-radius: 5px;
+            padding: 8px 14px;
+            text-align: center;
+        }
+
+        .logits-node .label {
+            font-size: 0.5rem;
+            color: var(--text-muted);
+            margin-bottom: 2px;
+            text-transform: uppercase;
+        }
+
+        .logits-node .value {
+            font-size: 0.7rem;
+            color: var(--activations-color);
+        }
+
+        .logits-node .dim-annotation {
+            font-size: 0.45rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .ce-block {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-elevated);
+            padding: 10px 14px;
+            border-radius: 5px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .ce-block .op-label {
+            font-size: 0.55rem;
+            color: var(--nonlinear-color);
+            font-weight: 600;
+        }
+
+        .scalar-output {
+            background: var(--loss-bg);
+            border: 2px solid var(--loss-color);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .scalar-output .value {
+            font-size: 0.7rem;
+            color: var(--loss-color);
+            font-weight: 600;
+        }
+
+        .scalar-output .label {
+            font-size: 0.4rem;
+            color: var(--text-muted);
+        }
+
+        /* Mode toggle updates */
+        .mode-toggles {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+            margin-bottom: 16px;
+        }
+
+        .mode-toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .mode-toggle-group label {
+            font-size: 0.6rem;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+        .mode-toggle-group label.active {
+            color: var(--text-primary);
+        }
+
+        .toggle-switch.backward::after {
+            background: var(--loss-color);
+        }
+
+        body.backward-mode .toggle-switch.backward::after {
+            transform: translateX(22px);
+        }
+        /* Loss computation block */
+        .loss-computation-block {
+            display: block;
+            width: 100%;
+            max-width: 480px;
+        }
+
+        /* Loss block styled like other processing blocks */
+        /* No special styling needed - inherits from .processing-block */
+
+        .loss-scalar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: 600;
+            background: var(--activations-bg);
+            border: 1.5px solid var(--activations-color);
+            color: var(--activations-color);
+        }
+
+        .loss-scalar-simple {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.6rem;
+            font-weight: 600;
+            background: var(--activations-bg);
+            border: 1.5px solid var(--activations-color);
+            color: var(--activations-color);
+        }
+
+        body.simple-mode .loss-computation-block {
+            max-width: 280px;
+            margin-top: 90px;  /* Push down to align with predicted/label token */
+        }
+
+        /* Predicted token section (forward mode) */
+        .predicted-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        body.backward-mode .predicted-section {
+            display: none;
+        }
+
+        .predicted-token-box {
+            background: var(--bg-solid);
+            border: 2px solid var(--activations-color);
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 0.7rem;
+            color: var(--activations-color);
+            position: relative;
+            z-index: 2;
+        }
+
+        .predicted-token-box .token-label {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.45rem;
+            color: var(--activations-color);
+        }
+
+        .predicted-token-box .token-dim {
+            position: absolute;
+            bottom: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.4rem;
+            color: var(--muted);
+        }
+
+        /* Label token section (backward mode) */
+        .label-section {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        body.backward-mode .label-section {
+            display: flex;
+        }
+
+        .label-token-box {
+            background: var(--bg-solid);
+            border: 2px solid var(--loss-color);
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 0.7rem;
+            color: var(--loss-color);
+            position: relative;
+            z-index: 2;
+        }
+
+        .label-token-box .token-label {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.45rem;
+            color: var(--loss-color);
+        }
+
+        .label-token-box .token-dim {
+            position: absolute;
+            bottom: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.4rem;
+            color: var(--text-muted);
+        }
+
+        body.simple-mode .label-token-box .token-label,
+        body.simple-mode .label-token-box .token-dim {
+            display: none;
+        }
+        /* Gradient styling removed - using data-info swapping instead */
+
+        /* Backward arrows keep standard colors, just reversed direction */
+        .v-arrow.backward {
+            background: var(--text-muted);
+        }
+
+        .v-arrow.backward::after {
+            border-top: none;
+            border-bottom: 5px solid var(--text-muted);
+            top: 0;
+            bottom: auto;
+        }
+
+        .h-arrow.backward::before {
+            background: var(--text-muted);
+        }
+
+        .h-arrow.backward.to-left .arrow-head {
+            border-right-color: var(--text-muted);
+        }
+
+        .h-arrow.backward.to-right .arrow-head {
+            border-left-color: var(--text-muted);
+        }
+
+        .flow-arrow.backward {
+            color: var(--text-muted);
+            transform: scaleX(-1);
+        }
+
+        /* Gradient annotations on arrows */
+        .gradient-annotation {
+            font-size: 0.38rem;
+            color: var(--text-secondary);
+            position: absolute;
+            white-space: nowrap;
+        }
+
+        .gradient-annotation.top {
+            top: -11px;
+        }
+
+        .gradient-annotation.bottom {
+            bottom: -11px;
+        }
+
+        /* Hide forward-only elements in backward mode */
+        body.backward-mode .forward-only {
+            display: none;
+        }
+
+        /* Show backward-only elements only in backward mode */
+        .backward-only {
+            display: none;
+        }
+
+        body.backward-mode .backward-only {
+            display: flex;
+        }
+
+        /* Backward mode: subtle reddish overlay on everything */
+        body.backward-mode .residual-stream {
+            box-shadow: 0 0 8px 2px rgba(236, 72, 153, 0.2);
+        }
+
+        body.backward-mode .v-arrow {
+            box-shadow: 0 0 6px 1px rgba(236, 72, 153, 0.2);
+        }
+
+        body.backward-mode .v-arrow::after {
+            border-top: none;
+            border-bottom: 5px solid var(--text-muted);
+            top: 0;
+            bottom: auto;
+        }
+
+        /* Add node in backward mode - keep original colors with subtle hue */
+        body.backward-mode .add-node {
+            box-shadow: 0 0 8px 2px rgba(236, 72, 153, 0.25);
+        }
+
+        /* Residual nodes in backward mode show gradients instead of values */
+        .residual-node .grad-value {
+            display: none;
+            font-size: 0.7rem;
+            color: var(--activations-color);
+        }
+
+        body.backward-mode .residual-node .value {
+            display: none;
+        }
+
+        body.backward-mode .residual-node .grad-value {
+            display: block;
+        }
+
+        body.backward-mode .residual-node {
+            box-shadow: 0 0 10px 2px rgba(236, 72, 153, 0.25);
+        }
+
+        /* Return arrows in backward mode */
+        body.backward-mode .h-arrow.return::before {
+            box-shadow: 0 0 6px 1px rgba(236, 72, 153, 0.2);
+        }
+
+        /* Flip arrow directions in backward mode */
+        body.backward-mode .h-arrow.to-left .arrow-head {
+            left: auto;
+            right: 0;
+            border-left: 5px solid var(--text-muted);
+            border-right: none;
+        }
+
+        body.backward-mode .h-arrow.to-right .arrow-head {
+            right: auto;
+            left: 0;
+            border-right: 5px solid var(--text-muted);
+            border-left: none;
+        }
+
+        /* Processing blocks get subtle reddish hue */
+        body.backward-mode .processing-block {
+            box-shadow: 0 0 12px 3px rgba(236, 72, 153, 0.2);
+        }
+
+        /* Tensors get subtle glow */
+        body.backward-mode .tensor-1d,
+        body.backward-mode .tensor-2d {
+            box-shadow: 0 0 8px 2px rgba(236, 72, 153, 0.2);
+        }
+
+        /* Token boxes get subtle glow */
+        body.backward-mode .token-box {
+            box-shadow: 0 0 8px 2px rgba(236, 72, 153, 0.2);
+        }
+
+        /* Keep forward detail view visible in backward mode */
+        /* Gradient views are hidden - we'll swap data-info attributes instead */
+        .detail-view.gradient-flow {
+            display: none;
+        }
+
+        /* Override inline gradient colors to use standard text colors */
+        body.backward-mode .component-label[style*="gradient-color"],
+        body.backward-mode .split-label[style*="gradient-color"],
+        body.backward-mode .heads-title[style*="gradient-color"],
+        body.backward-mode .op-symbol[style*="gradient-color"],
+        body.backward-mode .feed-label[style*="gradient-color"],
+        body.backward-mode .head-number[style*="gradient-color"],
+        body.backward-mode .head-slice[style*="gradient-color"] {
+            color: var(--text-secondary) !important;
+        }
+
+        body.backward-mode .heads-section[style*="gradient-color"],
+        body.backward-mode .split-label[style*="border-color"] {
+            border-color: var(--border-subtle) !important;
+        }
+
+        body.backward-mode .head-tag[style*="gradient-color"] {
+            color: var(--text-secondary) !important;
+            background: rgba(148, 163, 184, 0.15) !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-layout">
+        <div class="main-content">
+            <header>
+                <h1>Transformer Forward Pass</h1>
+                <p class="subtitle">Layer l, timestep t=4 ("cat") · d_model=512, d_head=64, n_heads=8</p>
+            </header>
+            
+            <div class="mode-toggles">
+                <div class="mode-toggle-group">
+                    <label id="label-detail" class="active">Detail</label>
+                    <div class="toggle-switch" id="toggle-switch"></div>
+                    <label id="label-simple">Simple</label>
+                </div>
+                <div class="mode-toggle-group">
+                    <label id="label-forward" class="active">Forward</label>
+                    <div class="toggle-switch backward" id="toggle-backward"></div>
+                    <label id="label-backward">Backward</label>
+                </div>
+            </div>
+            
+            <div class="legend">
+                <div class="legend-item"><div class="legend-1d"></div><span>1D Activation</span></div>
+                <div class="legend-item"><div class="legend-2d"></div><span>2D Weight</span></div>
+                <div class="legend-item"><div class="legend-dot residual"></div><span>Residual</span></div>
+                <div class="legend-item"><div class="legend-dot nonlinear"></div><span>Nonlinear</span></div>
+                <div class="legend-item"><div class="legend-dot" style="background: var(--head-color)"></div><span>Per-Head</span></div>
+            </div>
+            
+            <div class="tokens-section">
+                <div class="tokens-label">Layer l-1 outputs</div>
+                <div class="tokens-row">
+                    <div class="token-box faded clickable" data-info="token" data-t="1" data-token="I"><span class="token-label">t=1</span>I<span class="token-dim">[512]</span></div>
+                    <div class="token-box faded clickable" data-info="token" data-t="2" data-token="am"><span class="token-label">t=2</span>am<span class="token-dim">[512]</span></div>
+                    <div class="token-box faded clickable" data-info="token" data-t="3" data-token="a"><span class="token-label">t=3</span>a<span class="token-dim">[512]</span></div>
+                    <div class="token-box active clickable" data-info="token" data-t="4" data-token="cat"><span class="token-dim">[512]</span><span class="token-label">t=4</span>cat</div>
+                </div>
+            </div>
+            
+            <div class="viz-wrapper">
+                <div class="residual-stream"></div>
+                
+                <!-- LEFT: Attention -->
+                <div class="left-column">
+                    <div class="spacer-block tall"></div>
+                    
+                    <div class="processing-block">
+                        <div class="block-header">
+                            <span class="block-title clickable" data-info="mha-block">Multi-Head Attention</span>
+                            <div class="block-tags">
+                                <span class="block-tag nonlinear">8× softmax</span>
+                                <span class="block-tag linear">matmul</span>
+                            </div>
+                        </div>
+                        
+                        <!-- DETAIL VIEW -->
+                        <div class="detail-view">
+                            <div class="prev-tokens-feed clickable" data-info="history">
+                                <span class="mini-token">I</span>
+                                <span class="mini-token">am</span>
+                                <span class="mini-token">a</span>
+                                <span class="mini-token">cat</span>
+                                <span class="feed-label">← K,V use all t≤4</span>
+                            </div>
+                            
+                            <div class="qkv-projections">
+                                <div class="qkv-grid">
+                                    <div class="qkv-item">
+                                        <div class="component-label">Query (t=4)</div>
+                                        <div class="matrix-flow">
+                                            <div class="tensor-container"><span class="tensor-dim">[512]</span><div class="tensor-1d clickable" data-info="x4-mha">x₄</div></div>
+                                            <span class="op-symbol">×</span>
+                                            <div class="tensor-container"><span class="tensor-dim">[512×512]</span><div class="tensor-2d clickable" data-info="Wq">Wq</div></div>
+                                        </div>
+                                    </div>
+                                    <div class="qkv-item">
+                                        <div class="component-label">Keys</div>
+                                        <div class="matrix-flow">
+                                            <div class="tensor-container"><span class="tensor-dim">[4×512]</span><div class="tensor-2d small activation clickable" data-info="X-history">X</div></div>
+                                            <span class="op-symbol">×</span>
+                                            <div class="tensor-container"><span class="tensor-dim">[512×512]</span><div class="tensor-2d clickable" data-info="Wk">Wk</div></div>
+                                        </div>
+                                    </div>
+                                    <div class="qkv-item">
+                                        <div class="component-label">Values</div>
+                                        <div class="matrix-flow">
+                                            <div class="tensor-container"><span class="tensor-dim">[4×512]</span><div class="tensor-2d small activation clickable" data-info="X-history">X</div></div>
+                                            <span class="op-symbol">×</span>
+                                            <div class="tensor-container"><span class="tensor-dim">[512×512]</span><div class="tensor-2d clickable" data-info="Wv">Wv</div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="qkv-outputs">
+                                    <div class="tensor-container"><span class="tensor-dim">[512]</span><div class="tensor-1d clickable" data-info="Q">Q</div></div>
+                                    <div class="tensor-container"><span class="tensor-dim">[4×512]</span><div class="tensor-2d small activation clickable" data-info="K">K</div></div>
+                                    <div class="tensor-container"><span class="tensor-dim">[4×512]</span><div class="tensor-2d small activation clickable" data-info="V">V</div></div>
+                                </div>
+                            </div>
+                            
+                            <div class="split-arrows-container">
+                                <svg class="split-arrows-svg" id="split-svg"></svg>
+                                <div class="split-label clickable" data-info="split">split → 8 × 64</div>
+                            </div>
+                            
+                            <div class="heads-section">
+                                <div class="heads-title">8 Independent Heads</div>
+                                <div class="heads-grid" id="heads-grid"></div>
+                            </div>
+                            
+                            <div class="concat-arrows-container">
+                                <svg class="split-arrows-svg" id="concat-svg"></svg>
+                                <div class="split-label clickable" data-info="concat">concat → 512</div>
+                            </div>
+                            
+                            <div class="output-section">
+                                <div class="component-label">Output Projection <span class="block-tag linear">linear</span></div>
+                                <div class="matrix-flow">
+                                    <div class="tensor-container"><span class="tensor-dim">[512]</span><div class="tensor-1d clickable" data-info="H-concat">H</div></div>
+                                    <span class="op-symbol">×</span>
+                                    <div class="tensor-container"><span class="tensor-dim">[512×512]</span><div class="tensor-2d clickable" data-info="Wo">Wo</div></div>
+                                    <span class="flow-arrow">→</span>
+                                    <div class="tensor-container"><span class="tensor-dim">[512]</span><div class="tensor-1d clickable" data-info="attn-out">out</div></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SIMPLE VIEW -->
+                        <div class="simple-view simple-mha">
+                            <div class="simple-mha-flow">
+                                <div class="simple-stage input">
+                                    <span>current token queries history</span>
+                                </div>
+                                <div class="simple-arrow">↓</div>
+                                <div class="simple-stage heads">
+                                    <div class="simple-label">8 independent summaries</div>
+                                    <div class="head-row">
+                                        <div class="mini-head">1</div>
+                                        <div class="mini-head">2</div>
+                                        <div class="mini-head">3</div>
+                                        <div class="mini-head">4</div>
+                                        <div class="mini-head">5</div>
+                                        <div class="mini-head">6</div>
+                                        <div class="mini-head">7</div>
+                                        <div class="mini-head">8</div>
+                                    </div>
+                                    <div class="simple-label" style="color: var(--nonlinear-color);">each: softmax → weighted avg</div>
+                                </div>
+                                <div class="simple-arrow">↓</div>
+                                <div class="simple-stage output">
+                                    <span>mix heads linearly → residual</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- !-- LOSS COMPUTATION --> -->
+                    <div class="loss-computation-block">
+                        <div class="spacer-block"></div>
+                        <div class="spacer-block"></div>
+                        <div class="spacer-block"></div>
+                        <div class="spacer-block short"></div>
+                        <div class="processing-block loss-block">
+                            <div class="block-header">
+                                <span class="block-title clickable" data-info="loss-block">Loss Computation</span>
+                                <div class="block-tags">
+                                    <span class="block-tag nonlinear">softmax</span>
+                                    <span class="block-tag nonlinear">−log</span>
+                                </div>
+                            </div>
+                            
+                            <div class="detail-view">
+                                <div class="component-section">
+                                    <div class="component-label">Unembedding</div>
+                                    <div class="matrix-flow">
+                                        <div class="tensor-container"><span class="tensor-dim">[512]</span><div class="tensor-1d clickable" data-info="x-final">x<sup>L</sup></div></div>
+                                        <span class="op-symbol">×</span>
+                                        <div class="tensor-container"><span class="tensor-dim">[512×50257]</span><div class="tensor-2d clickable" data-info="W-unembed">W<sub>E</sub><sup>T</sup></div></div>
+                                        <span class="flow-arrow">→</span>
+                                        <div class="tensor-container"><span class="tensor-dim">[50257]</span><div class="tensor-1d clickable" data-info="logits">z</div></div>
+                                    </div>
+                                </div>
+                                
+                                <div class="component-section">
+                                    <div class="component-label">Cross-Entropy</div>
+                                    <div class="matrix-flow">
+                                        <div class="tensor-container"><span class="tensor-dim">[50257]</span><div class="tensor-1d clickable" data-info="logits">z</div></div>
+                                        <span class="op-symbol nonlinear clickable" data-info="softmax">softmax</span>
+                                        <span class="op-symbol nonlinear clickable" data-info="ce-loss">−log p[y]</span>
+                                        <span class="flow-arrow">→</span>
+                                        <div class="tensor-container">
+                                            <span class="tensor-dim">scalar</span>
+                                            <div class="loss-scalar clickable" data-info="loss-scalar">ℒ</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="simple-view">
+                                <div class="simple-mlp-flow">
+                                    <div class="simple-mlp-stage">
+                                        <div class="simple-mlp-bar narrow"></div>
+                                        <span class="simple-label">512</span>
+                                    </div>
+                                    <div class="simple-mlp-op">unembed</div>
+                                    <div class="simple-mlp-stage">
+                                        <div class="simple-mlp-bar wide" style="width: 48px;"></div>
+                                        <span class="simple-label">50257</span>
+                                    </div>
+                                    <div class="simple-mlp-op nonlinear">CE</div>
+                                    <div class="simple-mlp-stage">
+                                        <div class="loss-scalar-simple">ℒ</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="spacer-block short"></div>
+                </div>
+                
+                <!-- CENTER -->
+                <div class="center-column">
+                    <div class="residual-node clickable" data-info="input-residual">
+                        <div class="label">Input</div>
+                        <div class="value">x<sup>l-1</sup><sub>4</sub></div>
+                        <div class="grad-value">∂ℒ/∂x<sup>l-1</sup></div>
+                        <div class="dim-annotation">[512]</div>
+                    </div>
+                    
+                    <div class="center-spacer short"><div class="v-arrow"></div></div>
+                    <div class="layernorm-node clickable" data-info="layernorm1">LN₁</div>
+                    <div class="center-spacer short"><div class="v-arrow"></div></div>
+                    
+                    <div class="connection-row">
+                        <div class="left-connection">
+                            <div class="h-arrow to-left clickable" data-info="flow-to-attn">
+                                <span class="arrow-label forward-only">to attn</span>
+                                <span class="arrow-label backward-only" style="display:none;">∂ℒ/∂attn</span>
+                                <span class="arrow-head"></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="center-spacer xtall"><div class="v-arrow"></div></div>
+                    
+                    <div class="connection-row">
+                        <div class="left-connection">
+                            <span class="dropout-label clickable" data-info="dropout">drop</span>
+                            <div class="h-arrow return to-right clickable" data-info="flow-from-attn"><span class="arrow-head"></span></div>
+                        </div>
+                    </div>
+                    
+                    <div class="center-spacer short"></div>
+                    <div class="add-node clickable" data-info="residual-add-attn">+<span class="add-node-label left">+attn</span></div>
+                    <div class="center-spacer short"><div class="v-arrow"></div></div>
+                    
+                    <div class="layernorm-node clickable" data-info="layernorm2">LN₂</div>
+                    <div class="center-spacer short"><div class="v-arrow"></div></div>
+                    
+                    <div class="connection-row">
+                        <div class="right-connection">
+                            <div class="h-arrow to-right clickable" data-info="flow-to-mlp">
+                                <span class="arrow-label forward-only">to mlp</span>
+                                <span class="arrow-label backward-only" style="display:none;">∂ℒ/∂mlp</span>
+                                <span class="arrow-head"></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="center-spacer tall"><div class="v-arrow"></div></div>
+                    
+                    <div class="connection-row">
+                        <div class="right-connection">
+                            <div class="h-arrow return to-left clickable" data-info="flow-from-mlp"><span class="arrow-head"></span></div>
+                            <span class="dropout-label clickable" data-info="dropout">drop</span>
+                        </div>
+                    </div>
+                    
+                    <div class="center-spacer short"></div>
+                    <div class="add-node clickable" data-info="residual-add-mlp">+<span class="add-node-label right">+mlp</span></div>
+                    <div class="center-spacer short"><div class="v-arrow"></div></div>
+                    
+                    <div class="residual-node clickable" data-info="output-residual">
+                        <div class="label">Output</div>
+                        <div class="value">x<sup>l</sup><sub>4</sub></div>
+                        <div class="grad-value">∂ℒ/∂x<sup>l</sup></div>
+                        <div class="dim-annotation">[512]</div>
+                    </div>
+
+                    <!-- Predicted token (forward mode) -->
+                    <div class="predicted-section">
+                        <div class="center-spacer short"><div class="v-arrow"></div></div>
+                        <div class="predicted-token-box clickable" data-info="predicted-token">
+                            <span class="token-label">predicted</span>
+                            that
+                            <span class="token-dim">[argmax(z)]</span>
+                        </div>
+                    </div>
+
+                    <!-- Label token (backward mode) -->
+                    <div class="label-section">
+                        <div class="center-spacer short"><div class="v-arrow"></div></div>
+                        <div class="label-token-box clickable" data-info="label-token">
+                            <span class="token-label">label</span>
+                            sat
+                            <span class="token-dim">[y=9338]</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- RIGHT: MLP -->
+                <div class="right-column">
+                    <div class="spacer-block xtall"></div>
+                    <div class="spacer-block xtall"></div>
+                    <div class="spacer-block"></div>
+                    
+                    <div class="processing-block">
+                        <div class="block-header">
+                            <span class="block-title clickable" data-info="mlp-block">MLP</span>
+                            <div class="block-tags">
+                                <span class="block-tag nonlinear">GELU</span>
+                                <span class="block-tag linear">matmul</span>
+                            </div>
+                        </div>
+                        
+                        <!-- DETAIL VIEW -->
+                        <div class="detail-view">
+                            <div class="component-section">
+                                <div class="component-label">Up (4× expand)</div>
+                                <div class="matrix-flow">
+                                    <div class="tensor-container"><span class="tensor-dim">[512]</span><div class="tensor-1d clickable" data-info="x-mlp">x</div></div>
+                                    <span class="op-symbol">×</span>
+                                    <div class="tensor-container"><span class="tensor-dim">[512×2048]</span><div class="tensor-2d clickable" data-info="W-up">W↑</div></div>
+                                    <span class="flow-arrow">→</span>
+                                    <div class="tensor-container"><span class="tensor-dim">[2048]</span><div class="tensor-1d clickable" data-info="h-mlp">h</div></div>
+                                </div>
+                            </div>
+                            
+                            <div class="component-section">
+                                <div class="component-label">Activation</div>
+                                <div class="matrix-flow">
+                                    <div class="tensor-container"><span class="tensor-dim">[2048]</span><div class="tensor-1d clickable" data-info="h-mlp">h</div></div>
+                                    <span class="op-symbol nonlinear clickable" data-info="gelu">GELU</span>
+                                    <span class="flow-arrow">→</span>
+                                    <div class="tensor-container"><span class="tensor-dim">[2048]</span><div class="tensor-1d clickable" data-info="h-prime">h'</div></div>
+                                </div>
+                            </div>
+                            
+                            <div class="component-section">
+                                <div class="component-label">Down (contract)</div>
+                                <div class="matrix-flow">
+                                    <div class="tensor-container"><span class="tensor-dim">[2048]</span><div class="tensor-1d clickable" data-info="h-prime">h'</div></div>
+                                    <span class="op-symbol">×</span>
+                                    <div class="tensor-container"><span class="tensor-dim">[2048×512]</span><div class="tensor-2d clickable" data-info="W-down">W↓</div></div>
+                                    <span class="flow-arrow">→</span>
+                                    <div class="tensor-container"><span class="tensor-dim">[512]</span><div class="tensor-1d clickable" data-info="mlp-out">out</div></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SIMPLE VIEW -->
+                        <div class="simple-view">
+                            <div class="simple-mlp-flow">
+                                <div class="simple-mlp-stage">
+                                    <div class="simple-mlp-bar narrow"></div>
+                                    <span class="simple-label">512</span>
+                                </div>
+                                <div class="simple-mlp-op">expand</div>
+                                <div class="simple-mlp-stage">
+                                    <div class="simple-mlp-bar wide"></div>
+                                    <span class="simple-label">2048</span>
+                                </div>
+                                <div class="simple-mlp-op nonlinear">GELU</div>
+                                <div class="simple-mlp-stage">
+                                    <div class="simple-mlp-bar wide"></div>
+                                    <span class="simple-label">2048</span>
+                                </div>
+                                <div class="simple-mlp-op">contract</div>
+                                <div class="simple-mlp-stage">
+                                    <div class="simple-mlp-bar narrow"></div>
+                                    <span class="simple-label">512</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="spacer-block tall"></div>
+                </div>
+            </div>
+            
+            <div class="info-hint">Click any element to see equations, dimensions, and code →</div>
+        
+        </div>
+        
+        <div class="equation-sidebar" id="equation-sidebar">
+            <h3 id="sidebar-title">Click any element</h3>
+            <div id="equation-content">
+                <div class="sidebar-desc">Click on tokens, weights, activations, arrows, or heads.</div>
+                <div class="sidebar-section code">
+                    <div class="section-label">NanoGPT Block.forward()</div>
+                    <div class="section-content"><span class="cm"># Batched: x is [B, T, d_model]</span>
+x = x + self.attn(self.ln_1(x))
+x = x + self.mlp(self.ln_2(x))
+<span class="cm">return</span> x</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const headsGrid = document.getElementById('heads-grid');
+        const sidebarTitle = document.getElementById('sidebar-title');
+        const equationContent = document.getElementById('equation-content');
+        const toggleSwitch = document.getElementById('toggle-switch');
+        const labelDetail = document.getElementById('label-detail');
+        const labelSimple = document.getElementById('label-simple');
+
+        // Toggle mode
+        toggleSwitch.addEventListener('click', () => {
+            document.body.classList.toggle('simple-mode');
+            labelDetail.classList.toggle('active');
+            labelSimple.classList.toggle('active');
+        });
+
+        // Backward mode toggle  <-- ADD FROM HERE
+        const toggleBackward = document.getElementById('toggle-backward');
+        const labelForward = document.getElementById('label-forward');
+        const labelBackward = document.getElementById('label-backward');
+
+        // Mapping from forward info to gradient info
+        const forwardToGradient = {
+            // MHA
+            'attn-out': 'grad-attn-out',
+            'Wo': 'grad-Wo',
+            'H-concat': 'grad-H-concat',
+            'head': 'grad-head',
+            'Wq': 'grad-Wq',
+            'Wk': 'grad-Wk',
+            'Wv': 'grad-Wv',
+            'Q': 'grad-Q',
+            'K': 'grad-K',
+            'V': 'grad-V',
+            'X-history': 'grad-X-history',  // Context X in Keys/Values
+            'x-attn': 'grad-x-attn',
+            'x4-mha': 'grad-x-attn',  // x₄ in MHA block uses x-attn gradient
+            // MLP
+            'mlp-out': 'grad-mlp-out',
+            'W-down': 'grad-W-down',
+            'h-prime': 'grad-h-prime',
+            'gelu': 'grad-gelu',
+            'h-mlp': 'grad-h-mlp',
+            'W-up': 'grad-W-up',
+            'x-mlp': 'grad-x-mlp',
+            // Loss
+            'x-final': 'grad-x-final',
+            'W-unembed': 'grad-W-unembed',
+            'logits': 'grad-logits',
+            'loss-scalar': 'grad-loss-scalar',
+            'ce-loss': 'grad-ce-loss',
+            // Residuals
+            'input-residual': 'grad-input-residual',
+            'output-residual': 'grad-output-residual',
+            // Tokens
+            'token': 'grad-token',
+            // LayerNorm
+            'layernorm1': 'grad-layernorm1',
+            'layernorm2': 'grad-layernorm2',
+            // Residual adds
+            'residual-add-attn': 'grad-residual-add-attn',
+            'residual-add-mlp': 'grad-residual-add-mlp'
+        };
+
+        // Create reverse mapping
+        const gradientToForward = {};
+        for (const [fwd, grad] of Object.entries(forwardToGradient)) {
+            gradientToForward[grad] = fwd;
+        }
+
+        function swapDataInfo(toGradient) {
+            document.querySelectorAll('[data-info]').forEach(el => {
+                const currentInfo = el.dataset.info;
+                if (!currentInfo) return; // Skip if no data-info
+
+                if (toGradient) {
+                    // Switch to gradient info
+                    if (forwardToGradient[currentInfo]) {
+                        el.dataset.originalInfo = currentInfo;
+                        el.dataset.info = forwardToGradient[currentInfo];
+                    }
+                } else {
+                    // Switch back to forward info
+                    if (el.dataset.originalInfo) {
+                        el.dataset.info = el.dataset.originalInfo;
+                        delete el.dataset.originalInfo;
+                    }
+                }
+            });
+        }
+
+        toggleBackward.addEventListener('click', () => {
+            const isBackward = !document.body.classList.contains('backward-mode');
+            document.body.classList.toggle('backward-mode');
+            labelForward.classList.toggle('active');
+            labelBackward.classList.toggle('active');
+            swapDataInfo(isBackward);
+
+            // Update info box if an element is selected
+            const selectedElement = document.querySelector('.clickable.selected');
+            if (selectedElement && selectedElement.dataset.info) {
+                const infoKey = selectedElement.dataset.info;
+                if (infoData[infoKey]) {
+                    const data = typeof infoData[infoKey] === 'function'
+                        ? infoData[infoKey](selectedElement)
+                        : infoData[infoKey];
+                    renderInfo(data);
+                }
+            }
+        });
+        // <-- TO HERE
+        
+        // Helper to generate standard 3-section layout
+        function makeInfo(title, type, desc, eq, dim, code) {
+            return { title, type, desc, eq, dim, code };
+        }
+        
+        const infoData = {
+            'grad-head': (el) => {
+    const i = parseInt(el.dataset.head) + 1;
+    return makeInfo(
+        `∂ℒ/∂head<sub>${i}</sub>`,
+        'head',
+        `Gradient backprops through softmax (Jacobian), then to Q,K,V slices.`,
+        `<span class="r">∂ℒ/∂α<sub>${i}</sub></span> = <span class="r">∂ℒ/∂h<sub>${i}</sub></span> · <span class="a">V<sub>${i}</sub></span><sup>T</sup>
+<span class="r">∂ℒ/∂scores</span> = <span class="r">∂ℒ/∂α</span> ⊙ α ⊙ (1 - α)  <span class="cm">(softmax Jacobian)</span>`,
+        `∂ℒ/∂h${i}: [64]
+∂ℒ/∂α${i}: [4]  <span class="cm"># attention weights grad</span>
+∂ℒ/∂scores: [4]`,
+        `<span class="cm"># Softmax backward is tricky:</span>
+<span class="cm"># J_ij = α_i(δ_ij - α_j)</span>
+scores.grad = attn.grad @ softmax_jacobian`
+    );
+},
+            // MHA gradients
+'grad-attn-out': () => makeInfo(
+    '∂ℒ/∂out (attn)',
+    'activation',
+    'Gradient of loss w.r.t. attention output. Comes from residual stream.',
+    `<span class="r">∂ℒ/∂out</span> = <span class="r">∂ℒ/∂x<sup>l</sup></span>  <span class="cm">(via residual add)</span>`,
+    `∂ℒ/∂out: [512]`,
+    `<span class="cm"># Gradient flows through residual connection</span>
+<span class="cm"># out.grad = x_next.grad (copied)</span>`
+),
+'grad-Wo': () => makeInfo(
+    '∂ℒ/∂W<sub>O</sub>',
+    'weight',
+    'Gradient for output projection. Used for weight update.',
+    `<span class="r">∂ℒ/∂W<sub>O</sub></span> = <span class="a">H</span><sup>T</sup> · <span class="r">∂ℒ/∂out</span>`,
+    `∂ℒ/∂W_O: [512, 512]  <span class="cm"># same as W_O</span>`,
+    `<span class="cm"># Accumulated over batch</span>
+W_O.grad += H.T @ out.grad`
+),
+'grad-H-concat': () => makeInfo(
+    '∂ℒ/∂H (concat)',
+    'activation',
+    'Gradient w.r.t. concatenated head outputs. Split to each head.',
+    `<span class="r">∂ℒ/∂H</span> = <span class="r">∂ℒ/∂out</span> · <span class="w">W<sub>O</sub></span><sup>T</sup>`,
+    `∂ℒ/∂H: [512] → split → 8 × [64]`,
+    `H.grad = out.grad @ W_O.T`
+),
+'grad-Wq': () => makeInfo(
+    '∂ℒ/∂W<sub>Q</sub>',
+    'weight',
+    'Query projection gradient. Accumulated over batch.',
+    `<span class="r">∂ℒ/∂W<sub>Q</sub></span> = <span class="a">x</span><sup>T</sup> · <span class="r">∂ℒ/∂Q</span>`,
+    `∂ℒ/∂W_Q: [512, 512]`,
+    `W_Q.grad += x.T @ Q.grad`
+),
+'grad-Wk': () => makeInfo(
+    '∂ℒ/∂W<sub>K</sub>',
+    'weight',
+    'Key projection gradient.',
+    `<span class="r">∂ℒ/∂W<sub>K</sub></span> = <span class="a">X</span><sup>T</sup> · <span class="r">∂ℒ/∂K</span>`,
+    `∂ℒ/∂W_K: [512, 512]`,
+    `W_K.grad += X.T @ K.grad`
+),
+'grad-Wv': () => makeInfo(
+    '∂ℒ/∂W<sub>V</sub>',
+    'weight',
+    'Value projection gradient.',
+    `<span class="r">∂ℒ/∂W<sub>V</sub></span> = <span class="a">X</span><sup>T</sup> · <span class="r">∂ℒ/∂V</span>`,
+    `∂ℒ/∂W_V: [512, 512]`,
+    `W_V.grad += X.T @ V.grad`
+),
+'grad-Q': () => makeInfo(
+    '∂ℒ/∂Q',
+    'activation',
+    'Query gradient. Backprops through attention scores.',
+    `<span class="r">∂ℒ/∂Q</span> = <span class="r">∂ℒ/∂α</span> · ∂α/∂scores · <span class="a">K</span>`,
+    `∂ℒ/∂Q: [512]`,
+    `<span class="cm"># Through softmax and matmul</span>
+Q.grad = attn_scores.grad @ K`
+),
+'grad-K': () => makeInfo(
+    '∂ℒ/∂K',
+    'activation',
+    'Key gradient. Receives gradient from all queries that attended.',
+    `<span class="r">∂ℒ/∂K</span> = <span class="r">∂ℒ/∂scores</span><sup>T</sup> · <span class="a">Q</span>`,
+    `∂ℒ/∂K: [4, 512]`,
+    `K.grad = attn_scores.grad.T @ Q`
+),
+'grad-V': () => makeInfo(
+    '∂ℒ/∂V',
+    'activation',
+    'Value gradient. Weighted by attention weights.',
+    `<span class="r">∂ℒ/∂V</span> = <span class="a">α</span><sup>T</sup> · <span class="r">∂ℒ/∂h</span>`,
+    `∂ℒ/∂V: [4, 512]`,
+    `V.grad = attn_weights.T @ head_out.grad` a
+),
+'grad-X-history': () => makeInfo(
+    '∂ℒ/∂X (History)',
+    'activation',
+    'Gradient for context tokens. Sum of gradients from K and V paths.',
+    `<span class="r">∂ℒ/∂X</span> = <span class="r">∂ℒ/∂K</span>·<span class="w">W<sub>K</sub></span><sup>T</sup> + <span class="r">∂ℒ/∂V</span>·<span class="w">W<sub>V</sub></span><sup>T</sup>`,
+    `∂ℒ/∂X: [4, 512]  <span class="cm"># all context positions</span>`,
+    `<span class="cm"># Gradient flows to all context tokens</span>
+X.grad = K.grad @ W_K.T + V.grad @ W_V.T`
+),
+'grad-x-attn': () => makeInfo(
+    '∂ℒ/∂x (attn input)',
+    'activation',
+    'Input gradient from attention. Added to residual gradient.',
+    `<span class="r">∂ℒ/∂x</span> = <span class="r">∂ℒ/∂Q</span>·<span class="w">W<sub>Q</sub></span><sup>T</sup> + <span class="r">∂ℒ/∂K</span>·<span class="w">W<sub>K</sub></span><sup>T</sup> + <span class="r">∂ℒ/∂V</span>·<span class="w">W<sub>V</sub></span><sup>T</sup>`,
+    `∂ℒ/∂x: [512]`,
+    `x.grad = Q.grad @ W_Q.T + K.grad @ W_K.T + V.grad @ W_V.T`
+),
+
+// MLP gradients
+'grad-mlp-out': () => makeInfo(
+    '∂ℒ/∂out (mlp)',
+    'activation',
+    'Gradient of loss w.r.t. MLP output. From residual stream.',
+    `<span class="r">∂ℒ/∂out</span> = <span class="r">∂ℒ/∂x<sup>l</sup></span>`,
+    `∂ℒ/∂out: [512]`,
+    `<span class="cm"># Copied from residual gradient</span>`
+),
+'grad-W-down': () => makeInfo(
+    '∂ℒ/∂W<sub>down</sub>',
+    'weight',
+    'Down projection gradient.',
+    `<span class="r">∂ℒ/∂W↓</span> = <span class="a">h'</span><sup>T</sup> · <span class="r">∂ℒ/∂out</span>`,
+    `∂ℒ/∂W_down: [2048, 512]`,
+    `W_down.grad += h_prime.T @ out.grad`
+),
+'grad-h-prime': () => makeInfo(
+    "∂ℒ/∂h' (post-GELU)",
+    'activation',
+    'Gradient after GELU. Backprops through down projection.',
+    `<span class="r">∂ℒ/∂h'</span> = <span class="r">∂ℒ/∂out</span> · <span class="w">W↓</span><sup>T</sup>`,
+    `∂ℒ/∂h': [2048]`,
+    `h_prime.grad = out.grad @ W_down.T`
+),
+'grad-gelu': () => makeInfo(
+    'GELU Gradient',
+    'nonlinear',
+    'Element-wise multiply by GELU derivative. Non-zero everywhere.',
+    `<span class="r">∂ℒ/∂h</span> = <span class="r">∂ℒ/∂h'</span> ⊙ <span class="nl">GELU'</span>(<span class="a">h</span>)`,
+    `GELU'(x) ≈ σ(1.7x) + x·σ(1.7x)·(1-σ(1.7x))·1.7`,
+    `<span class="cm"># Autograd computes this</span>
+h.grad = h_prime.grad * gelu_derivative(h)`
+),
+'grad-h-mlp': () => makeInfo(
+    '∂ℒ/∂h (pre-GELU)',
+    'activation',
+    'Gradient before GELU activation.',
+    `<span class="r">∂ℒ/∂h</span> = <span class="r">∂ℒ/∂h'</span> ⊙ <span class="nl">GELU'</span>(<span class="a">h</span>)`,
+    `∂ℒ/∂h: [2048]`,
+    `h.grad = h_prime.grad * gelu_grad`
+),
+'grad-W-up': () => makeInfo(
+    '∂ℒ/∂W<sub>up</sub>',
+    'weight',
+    'Up projection gradient.',
+    `<span class="r">∂ℒ/∂W↑</span> = <span class="a">x</span><sup>T</sup> · <span class="r">∂ℒ/∂h</span>`,
+    `∂ℒ/∂W_up: [512, 2048]`,
+    `W_up.grad += x.T @ h.grad`
+),
+'grad-x-mlp': () => makeInfo(
+    '∂ℒ/∂x (mlp input)',
+    'activation',
+    'Input gradient from MLP. Added to residual gradient.',
+    `<span class="r">∂ℒ/∂x</span> = <span class="r">∂ℒ/∂h</span> · <span class="w">W↑</span><sup>T</sup>`,
+    `∂ℒ/∂x: [512]`,
+    `x.grad = h.grad @ W_up.T`
+),
+            'grad-input-residual': () => makeInfo(
+                '∂ℒ/∂x<sup>l-1</sup>',
+                'gradient',
+                'Gradient of loss w.r.t. layer input. Sum of paths through attn and residual.',
+                `<span class="r">∂ℒ/∂x<sup>l-1</sup></span> = <span class="r">∂ℒ/∂x<sup>l</sup></span> · (1 + ∂attn/∂x + ∂mlp/∂x)`,
+                `∂ℒ/∂x: [512]  <span class="cm"># same shape as x</span>`,
+                `<span class="cm"># Autograd handles this</span>
+loss.backward()
+x.grad  <span class="cm"># [B, T, 512]</span>`
+            ),
+            'grad-output-residual': () => makeInfo(
+                '∂ℒ/∂x<sup>l</sup>',
+                'gradient',
+                'Gradient flows from loss through all downstream layers.',
+                `<span class="r">∂ℒ/∂x<sup>l</sup></span> = <span class="r">∂ℒ/∂x<sup>l+1</sup></span> · ∂x<sup>l+1</sup>/∂x<sup>l</sup>`,
+                `∂ℒ/∂x: [512]`,
+                `<span class="cm"># Chain rule through layers</span>
+<span class="cm"># Each layer adds its contribution</span>`
+            ),
+            'x-final': () => makeInfo(
+                'x<sup>L</sup> (Final output)',
+                'activation',
+                'Output from final transformer layer. Ready for unembedding.',
+                `<span class="a">x<sup>L</sup></span> = output of layer L`,
+                `x: [B, T, 512]
+x₄: [512]  <span class="cm"># for token t=4</span>`,
+                `<span class="cm"># After all layers</span>
+x = self.transformer.ln_f(x)  <span class="cm"># final LN</span>`
+            ),
+            'W-unembed': () => makeInfo(
+                'W<sub>E</sub><sup>T</sup> (Unembedding)',
+                'weight',
+                'Projects from model dim to vocab. Often tied with embedding weights.',
+                `<span class="a">z</span> = <span class="a">x</span> · <span class="w">W<sub>E</sub><sup>T</sup></span>`,
+                `W_E: [50257, 512]  <span class="cm"># vocab × d_model</span>
+W_E<sup>T</sup>: [512, 50257]`,
+                `<span class="cm"># Often weight-tied:</span>
+self.lm_head.weight = self.wte.weight
+logits = x @ self.wte.weight.T`
+            ),
+            'logits': () => makeInfo(
+                'Logits z',
+                'activation',
+                'Unnormalized scores for each vocab token. Input to softmax.',
+                `<span class="a">z</span> = <span class="a">x<sup>L</sup></span> · <span class="w">W<sub>E</sub><sup>T</sup></span>`,
+                `z: [50257]  <span class="cm"># one score per vocab token</span>`,
+                `logits = self.lm_head(x)  <span class="cm"># [B,T,50257]</span>`
+            ),
+            'softmax': () => makeInfo(
+                'Softmax',
+                'nonlinear',
+                'Converts logits to probability distribution over vocab.',
+                `<span class="a">p<sub>i</sub></span> = exp(<span class="a">z<sub>i</sub></span>) / Σ<sub>j</sub> exp(<span class="a">z<sub>j</sub></span>)`,
+                `z: [50257] → p: [50257]
+            Σ p_i = 1`,
+                `probs = F.softmax(logits, dim=-1)`
+            ),
+            'ce-loss': () => makeInfo(
+                'Cross-Entropy Loss',
+                'nonlinear',
+                'Negative log prob of correct token. Combines softmax + NLL.',
+                `<span class="nl">ℒ</span> = −log p[y] = −z<sub>y</sub> + log Σ exp(z<sub>j</sub>)`,
+                `z: [50257], y: scalar index
+            ℒ: scalar`,
+                `<span class="cm"># Numerically stable combined op</span>
+            loss = F.cross_entropy(logits, targets)`
+            ),
+            'loss-scalar': () => makeInfo(
+                'Loss ℒ',
+                'nonlinear',
+                'Scalar loss. Backward pass computes ∂ℒ/∂θ for all parameters.',
+                `<span class="nl">ℒ</span> ∈ ℝ  <span class="cm"># single number</span>`,
+                `ℒ: scalar
+            <span class="cm"># typical range: 0.5 - 10+</span>`,
+                `loss = F.cross_entropy(logits.view(-1, V), targets.view(-1))
+            <span class="hl">loss.backward()</span>  <span class="cm"># compute all gradients</span>`
+            ),
+            'grad-loss-scalar': () => makeInfo(
+                '∂ℒ/∂ℒ',
+                'gradient',
+                'Loss gradient w.r.t. itself is always 1. Starting point for backprop.',
+                `<span class="r">∂ℒ/∂ℒ</span> = 1`,
+                `gradient: scalar (1)`,
+                `<span class="cm"># Backward starts here</span>
+loss.backward()  <span class="cm"># implicitly: loss.backward(torch.ones_like(loss))</span>`
+            ),
+            'grad-logits': () => makeInfo(
+                '∂ℒ/∂z (logits gradient)',
+                'activation',
+                'Gradient of cross-entropy loss w.r.t. logits. Softmax - one-hot.',
+                `<span class="r">∂ℒ/∂z</span> = softmax(<span class="a">z</span>) - one_hot(y)`,
+                `∂ℒ/∂z: [50257]
+<span class="cm"># All dims get small negative grad</span>
+<span class="cm"># except correct class gets (p - 1)</span>`,
+                `<span class="cm"># CE gradient is remarkably simple:</span>
+z.grad = probs.clone()
+z.grad[target_idx] -= 1  <span class="cm"># subtract 1 from correct class</span>`
+            ),
+            'grad-W-unembed': () => makeInfo(
+                '∂ℒ/∂W<sub>E</sub> (unembed gradient)',
+                'weight',
+                'Gradient for unembedding weights. Updated during training.',
+                `<span class="r">∂ℒ/∂W<sub>E</sub></span> = <span class="a">x<sup>L</sup></span><sup>T</sup> · <span class="r">∂ℒ/∂z</span>`,
+                `∂ℒ/∂W_E: [512, 50257]
+<span class="cm"># Often tied with embedding</span>`,
+                `<span class="cm"># Accumulated over batch</span>
+W_E.grad += x.T @ z.grad`
+            ),
+            'grad-x-final': () => makeInfo(
+                '∂ℒ/∂x<sup>L</sup> (final layer gradient)',
+                'activation',
+                'Gradient flowing back to final transformer layer output.',
+                `<span class="r">∂ℒ/∂x<sup>L</sup></span> = <span class="r">∂ℒ/∂z</span> · <span class="w">W<sub>E</sub></span>`,
+                `∂ℒ/∂x<sup>L</sup>: [512]`,
+                `x.grad = z.grad @ W_E  <span class="cm"># flows to layer L</span>`
+            ),
+            'grad-ce-loss': () => makeInfo(
+                '∂CE/∂z',
+                'nonlinear',
+                'Cross-entropy gradient. Combines softmax and log derivatives.',
+                `<span class="r">∂CE/∂z<sub>i</sub></span> = p<sub>i</sub> - 𝟙[i=y]`,
+                `p = softmax(z): [50257]
+gradient: [50257]`,
+                `<span class="cm"># Softmax-CE backward in one step</span>
+grad = F.softmax(logits, dim=-1)
+grad[..., target] -= 1`
+            ),
+            'predicted-token': () => makeInfo(
+                'Predicted Token',
+                'activation',
+                'Model\'s prediction for the next token. Chosen by taking argmax of logits.',
+                `ŷ = argmax(z) = argmax(softmax(x<sup>L</sup> · W<sub>E</sub><sup>T</sup>))`,
+                `ŷ: scalar  <span class="cm"># predicted token index</span>
+z: [50257]  <span class="cm"># logits over vocabulary</span>`,
+                `<span class="cm"># Get predicted token</span>
+predicted_id = logits.argmax(dim=-1)
+predicted_token = tokenizer.decode(predicted_id)
+<span class="cm"># In this example: "that" (wrong - label is "sat")</span>`
+            ),
+            'label-token': () => makeInfo(
+                'Label y (target)',
+                'activation',
+                'Ground truth next token. Model learns to maximize p(y|context).',
+                `y = tokenize("sat") = 9338`,
+                `y: scalar  <span class="cm"># token index</span>
+targets: [B, T]  <span class="cm"># batched</span>`,
+                `<span class="cm"># Labels are inputs shifted by 1</span>
+targets = input_ids[:, 1:]
+inputs = input_ids[:, :-1]`
+            ),
+            'loss-block': () => makeInfo(
+                'Loss Computation',
+                'nonlinear',
+                'Unembed to vocab logits, then cross-entropy with label.',
+                `<span class="nl">ℒ</span> = −log softmax(<span class="a">x<sup>L</sup></span> · <span class="w">W<sub>E</sub><sup>T</sup></span>)[y]`,
+                `x: [512] → z: [50257] → ℒ: scalar`,
+                `logits = self.lm_head(x)
+            loss = F.cross_entropy(logits, targets)`
+            ),
+            'token': (el) => {
+                const t = el.dataset.t;
+                return makeInfo(
+                    `x<sup>l-1</sup><sub>${t}</sub>`,
+                    'activation',
+                    `Activation for "${el.dataset.token}" at t=${t}. Contains info from all previous layers and timesteps t≤${t}.`,
+                    `<span class="a">x<sup>l-1</sup><sub>${t}</sub></span> = <span class="a">x<sup>l-2</sup><sub>${t}</sub></span> + attn<sup>l-1</sup>(<span class="a">X<sup>l-2</sup><sub>≤${t}</sub></span>) + mlp<sup>l-1</sup>(...)`,
+                    `x<sup>l-1</sup><sub>${t}</sub>: [512]
+attn input X: [${t}, 512]  <span class="cm"># all timesteps ≤${t}</span>
+mlp input: [512]  <span class="cm"># takes attn output</span>`,
+                    `<span class="cm"># In batched form: x is [B, T, d_model]</span>
+<span class="cm"># For token ${t}, we slice x[:, ${t-1}, :]</span>
+x = x + self.attn(self.ln_1(x))
+x = x + self.mlp(self.ln_2(x))`
+                );
+            },
+            'grad-token': (el) => {
+                const t = el.dataset.t;
+                return makeInfo(
+                    `∂ℒ/∂x<sup>l-1</sup><sub>${t}</sub>`,
+                    'activation',
+                    `Gradient for "${el.dataset.token}" at t=${t}. Flows from loss through all paths that use this token.`,
+                    `<span class="r">∂ℒ/∂x<sup>l-1</sup><sub>${t}</sub></span> = <span class="r">∂ℒ/∂x<sup>l</sup><sub>${t}</sub></span> + <span class="r">∂ℒ/∂attn</span> · ∂attn/∂x + <span class="r">∂ℒ/∂mlp</span> · ∂mlp/∂x`,
+                    `∂ℒ/∂x<sup>l-1</sup><sub>${t}</sub>: [512]
+<span class="cm"># Accumulates from:</span>
+<span class="cm"># 1. Direct path (residual)</span>
+<span class="cm"># 2. Attention path</span>
+<span class="cm"># 3. MLP path</span>`,
+                    `<span class="cm"># Gradient flows backward through layer</span>
+<span class="cm"># Token ${t} receives gradients from all future tokens ≥${t}</span>
+loss.backward()
+print(x[${t-1}].grad)  <span class="cm"># [512] gradient vector</span>`
+                );
+            },
+            'input-residual': () => makeInfo(
+                        'Input x<sup>l-1</sup><sub>4</sub>',
+                        'activation',
+                        'Input to layer l. Output from previous layer enters residual stream.',
+                        `<span class="a">x<sup>l-1</sup></span> = output from layer l-1`,
+                        `x: [B, T, 512]  <span class="cm"># batched</span>
+x₄: [512]  <span class="cm"># single token</span>`,
+                        `<span class="cm"># Input to forward()</span>
+<span class="hl">def forward(self, x):</span>  <span class="cm"># x: [B, T, d_model]</span>
+    x = x + self.attn(self.ln_1(x))
+...`
+                    ),
+                'output-residual': () => makeInfo(
+                        'Output x<sup>l</sup><sub>4</sub>',
+                        'activation',
+                        'Layer output = input + attn + mlp. Goes to next layer.',
+                        `<span class="a">x<sup>l</sup></span> = <span class="a">x<sup>l-1</sup></span> + <span class="a">attn</span> + <span class="a">mlp</span>`,
+                        `x: [B, T, 512]`,
+                        `x = x + self.attn(self.ln_1(x))
+x = x + self.mlp(self.ln_2(x))
+<span class="hl">return x</span>`
+                    ),
+            'layernorm1': () => makeInfo(
+                'LayerNorm₁',
+                'nonlinear',
+                'Normalizes before attention. Zero mean, unit variance, then scale+shift.',
+                `<span class="a">y</span> = <span class="w">γ</span> · (<span class="a">x</span> - μ) / σ + <span class="w">β</span>`,
+                `x: [B, T, 512] → y: [B, T, 512]
+γ, β: [512]  <span class="cm"># learned</span>`,
+                `x = x + self.attn(<span class="hl">self.ln_1(x)</span>)
+<span class="cm"># ln_1 = nn.LayerNorm(n_embd)</span>`
+            ),
+            'layernorm2': () => makeInfo(
+                'LayerNorm₂',
+                'nonlinear',
+                'Normalizes before MLP. Applied after attention is added.',
+                `<span class="a">y</span> = <span class="w">γ</span> · (<span class="a">x</span> - μ) / σ + <span class="w">β</span>`,
+                `x: [B, T, 512] → y: [B, T, 512]`,
+                `x = x + self.attn(self.ln_1(x))
+x = x + self.mlp(<span class="hl">self.ln_2(x)</span>)`
+            ),
+            'grad-layernorm1': () => makeInfo(
+                '∂ℒ/∂LN₁',
+                'nonlinear',
+                'Gradient through LayerNorm before attention. Includes scale/shift derivatives.',
+                `<span class="r">∂ℒ/∂x</span> = <span class="r">∂ℒ/∂y</span> · ∂LN/∂x  <span class="cm">(complex: involves γ, σ, μ)</span>`,
+                `∂ℒ/∂x: [B, T, 512]
+∂ℒ/∂γ: [512]  <span class="cm"># scale gradient</span>
+∂ℒ/∂β: [512]  <span class="cm"># shift gradient</span>`,
+                `<span class="cm"># LayerNorm backprop is complex</span>
+<span class="cm"># PyTorch handles it automatically</span>
+loss.backward()
+print(ln_1.weight.grad)  <span class="cm"># γ gradient</span>
+print(ln_1.bias.grad)    <span class="cm"># β gradient</span>`
+            ),
+            'grad-layernorm2': () => makeInfo(
+                '∂ℒ/∂LN₂',
+                'nonlinear',
+                'Gradient through LayerNorm before MLP. Applied after attention addition.',
+                `<span class="r">∂ℒ/∂x</span> = <span class="r">∂ℒ/∂y</span> · ∂LN/∂x`,
+                `∂ℒ/∂x: [B, T, 512]
+∂ℒ/∂γ: [512]
+∂ℒ/∂β: [512]`,
+                `<span class="cm"># Gradient flows from MLP backward through LN₂</span>
+loss.backward()
+print(ln_2.weight.grad, ln_2.bias.grad)`
+            ),
+            'flow-to-attn': () => makeInfo(
+                '→ To Attention',
+                'flow',
+                'LN₁ output flows to attention block.',
+                `attn_input = <span class="nl">LN₁</span>(<span class="a">x</span>)`,
+                `[B, T, 512] → attn block`,
+                `x = x + self.attn(<span class="hl">self.ln_1(x)</span>)
+<span class="cm"># self.ln_1(x) is the input to attn</span>`
+            ),
+            'flow-from-attn': () => makeInfo(
+                '← From Attention',
+                'flow',
+                'Attention output returns to be added to residual.',
+                `<span class="a">x</span> = <span class="a">x</span> + <span class="a">attn_out</span>`,
+                `attn_out: [B, T, 512]`,
+                `x = x + <span class="hl">self.attn(...)</span>
+<span class="cm"># Added to residual stream</span>`
+            ),
+            'flow-to-mlp': () => makeInfo(
+                '→ To MLP',
+                'flow',
+                'LN₂ output (post-attention residual) flows to MLP.',
+                `mlp_input = <span class="nl">LN₂</span>(<span class="a">x</span> + <span class="a">attn</span>)`,
+                `[B, T, 512] → mlp block`,
+                `x = x + self.attn(self.ln_1(x))
+x = x + self.mlp(<span class="hl">self.ln_2(x)</span>)
+<span class="cm"># Note: x now includes attn output</span>`
+            ),
+            'flow-from-mlp': () => makeInfo(
+                '← From MLP',
+                'flow',
+                'MLP output returns to complete the layer.',
+                `<span class="a">x</span> = <span class="a">x</span> + <span class="a">mlp_out</span>`,
+                `mlp_out: [B, T, 512]`,
+                `x = x + <span class="hl">self.mlp(...)</span>`
+            ),
+            'residual-add-attn': () => makeInfo(
+                '+ (Attention)',
+                'flow',
+                'First residual add: x + attn output.',
+                `<span class="a">x</span> ← <span class="a">x</span> + <span class="a">attn(ln₁(x))</span>`,
+                `[B,T,512] + [B,T,512] → [B,T,512]`,
+                `x = x <span class="hl">+</span> self.attn(self.ln_1(x))`
+            ),
+            'residual-add-mlp': () => makeInfo(
+                '+ (MLP)',
+                'flow',
+                'Second residual add: x + mlp output.',
+                `<span class="a">x</span> ← <span class="a">x</span> + <span class="a">mlp(ln₂(x))</span>`,
+                `[B,T,512] + [B,T,512] → [B,T,512]`,
+                `x = x <span class="hl">+</span> self.mlp(self.ln_2(x))`
+            ),
+            'grad-residual-add-attn': () => makeInfo(
+                '∂(+) Attention',
+                'flow',
+                'Gradient through residual add. Splits equally to both branches.',
+                `<span class="r">∂ℒ/∂x<sub>in</sub></span> = <span class="r">∂ℒ/∂x<sub>out</sub></span> · 1  <span class="cm">(copy to residual)</span>
+<span class="r">∂ℒ/∂attn</span> = <span class="r">∂ℒ/∂x<sub>out</sub></span> · 1  <span class="cm">(copy to attn path)</span>`,
+                `<span class="cm"># Addition distributes gradient to both inputs</span>
+∂ℒ/∂x: [B,T,512]
+∂ℒ/∂attn: [B,T,512]`,
+                `<span class="cm"># Gradient splits at addition nodes</span>
+<span class="cm"># Each path gets full gradient (∂ + ∂ = copy)</span>
+loss.backward()`
+            ),
+            'grad-residual-add-mlp': () => makeInfo(
+                '∂(+) MLP',
+                'flow',
+                'Gradient through second residual add. Splits to residual and MLP paths.',
+                `<span class="r">∂ℒ/∂x<sub>in</sub></span> = <span class="r">∂ℒ/∂x<sub>out</sub></span>
+<span class="r">∂ℒ/∂mlp</span> = <span class="r">∂ℒ/∂x<sub>out</sub></span>`,
+                `<span class="cm"># Both paths receive same gradient</span>
+∂ℒ/∂x: [B,T,512]
+∂ℒ/∂mlp: [B,T,512]`,
+                `<span class="cm"># Addition node: ∂(a+b) = ∂a + ∂b = 1 + 1</span>
+loss.backward()`
+            ),
+            'dropout': () => makeInfo(
+                'Dropout',
+                'nonlinear',
+                'Randomly zeros elements during training (p=0.1).',
+                `<span class="a">y</span> = <span class="a">x</span> · mask / (1-p)`,
+                `[B, T, 512] → [B, T, 512]`,
+                `<span class="cm"># Inside attn/mlp:</span>
+self.resid_dropout(y)  <span class="cm"># p=0.1</span>`
+            ),
+            'x4-mha': () => makeInfo(
+                'x₄ (Query input)',
+                'activation',
+                'Current token activation → Query. Only t=4 used for Q.',
+                `<span class="a">x₄</span> = <span class="nl">LN₁</span>(<span class="a">x<sup>l-1</sup><sub>4</sub></span>)`,
+                `x₄: [512]`,
+                `<span class="cm"># Q uses current token</span>
+q = x @ self.c_attn_q  <span class="cm"># x: [B, T, d_model]</span>`
+            ),
+            'X-history': () => makeInfo(
+                'X (History)',
+                'activation',
+                'All tokens t≤4 stacked. Used for K and V.',
+                `<span class="a">X</span> = stack(<span class="a">x₁</span>, <span class="a">x₂</span>, <span class="a">x₃</span>, <span class="a">x₄</span>)`,
+                `X: [4, 512]  <span class="cm"># or [B, T, 512] batched</span>`,
+                `<span class="cm"># K,V use all positions</span>
+k = x @ self.c_attn_k
+v = x @ self.c_attn_v`
+            ),
+            'Wq': () => makeInfo(
+                'W<sub>Q</sub>',
+                'weight',
+                'Projects to query space: "what am I looking for?"',
+                `<span class="a">Q</span> = <span class="a">x</span> · <span class="w">W<sub>Q</sub></span>`,
+                `W_Q: [512, 512]
+x: [B,T,512] → Q: [B,T,512]`,
+                `self.c_attn = nn.Linear(d_model, 3*d_model)
+<span class="cm"># or split: W_q, W_k, W_v</span>`
+            ),
+            'Wk': () => makeInfo(
+                'W<sub>K</sub>',
+                'weight',
+                'Projects to key space: "what do I contain?"',
+                `<span class="a">K</span> = <span class="a">X</span> · <span class="w">W<sub>K</sub></span>`,
+                `W_K: [512, 512]
+X: [B,T,512] → K: [B,T,512]`,
+                `k = x @ self.c_attn[..., d_model:2*d_model]`
+            ),
+            'Wv': () => makeInfo(
+                'W<sub>V</sub>',
+                'weight',
+                'Projects to value space: "what to contribute?"',
+                `<span class="a">V</span> = <span class="a">X</span> · <span class="w">W<sub>V</sub></span>`,
+                `W_V: [512, 512]
+X: [B,T,512] → V: [B,T,512]`,
+                `v = x @ self.c_attn[..., 2*d_model:]`
+            ),
+            'Q': () => makeInfo(
+                'Q (Query)',
+                'activation',
+                'Query vector for t=4. Split into 8 heads.',
+                `<span class="a">Q</span> = <span class="a">x₄</span> · <span class="w">W<sub>Q</sub></span>`,
+                `Q: [512] → split → 8 × [64]`,
+                `q = q.view(B,T,n_head,d_model//n_head)
+q = q.transpose(1,2)  <span class="cm"># [B,nh,T,hs]</span>`
+            ),
+            'K': () => makeInfo(
+                'K (Keys)',
+                'activation',
+                'Key vectors for all t≤4. Matched against Q.',
+                `<span class="a">K</span> = <span class="a">X</span> · <span class="w">W<sub>K</sub></span>`,
+                `K: [4, 512] → split → [4, 8, 64]`,
+                `k = k.view(B,T,n_head,d_model//n_head)
+k = k.transpose(1,2)  <span class="cm"># [B,nh,T,hs]</span>`
+            ),
+            'V': () => makeInfo(
+                'V (Values)',
+                'activation',
+                'Value vectors. Weighted sum produces output.',
+                `<span class="a">V</span> = <span class="a">X</span> · <span class="w">W<sub>V</sub></span>`,
+                `V: [4, 512] → split → [4, 8, 64]`,
+                `v = v.view(B,T,n_head,d_model//n_head)
+v = v.transpose(1,2)  <span class="cm"># [B,nh,T,hs]</span>`
+            ),
+            'split': () => makeInfo(
+                'Head Split',
+                'head',
+                '512-dim split into 8 heads of 64-dim each.',
+                `<span class="h">q<sub>i</sub></span> = <span class="a">Q</span>[(i-1)·64 : i·64]`,
+                `[512] → 8 × [64]
+[B,T,512] → [B,8,T,64]`,
+                `q = q.view(B, T, n_head, head_size)
+q = q.transpose(1, 2)`
+            ),
+            'concat': () => makeInfo(
+                'Head Concat',
+                'head',
+                '8 head outputs concatenated back to 512.',
+                `<span class="a">H</span> = concat(<span class="h">h₁</span>,...,<span class="h">h₈</span>)`,
+                `8 × [64] → [512]
+[B,8,T,64] → [B,T,512]`,
+                `y = y.transpose(1,2).contiguous()
+y = y.view(B, T, d_model)`
+            ),
+            'H-concat': () => makeInfo(
+                'H (Concat)',
+                'activation',
+                'All 8 head outputs concatenated. No mixing yet.',
+                `<span class="a">H</span> = [<span class="h">h₁</span>|<span class="h">h₂</span>|...|<span class="h">h₈</span>]`,
+                `H: [512]  <span class="cm"># 8×64 segments</span>`,
+                `y = y.transpose(1,2).view(B,T,d_model)`
+            ),
+            'Wo': () => makeInfo(
+                'W<sub>O</sub>',
+                'weight',
+                'Output projection. ONLY place heads mix (linear).',
+                `<span class="a">out</span> = <span class="a">H</span> · <span class="w">W<sub>O</sub></span>`,
+                `W_O: [512, 512]
+H: [B,T,512] → out: [B,T,512]`,
+                `self.c_proj = nn.Linear(d_model, d_model)
+y = self.c_proj(y)`
+            ),
+            'attn-out': () => makeInfo(
+                'Attention Output',
+                'activation',
+                'Final attention output. Added to residual.',
+                `<span class="a">out</span> = <span class="a">H</span> · <span class="w">W<sub>O</sub></span>`,
+                `out: [B, T, 512]`,
+                `y = self.c_proj(y)
+y = self.resid_dropout(y)
+<span class="cm">return</span> y`
+            ),
+            'mha-block': () => makeInfo(
+                'Multi-Head Attention',
+                'head',
+                '8 independent heads with softmax, combined by W_O.',
+                `<span class="a">out</span> = concat(<span class="nl">softmax</span>(<span class="a">QK<sup>T</sup></span>/8)·<span class="a">V</span>) · <span class="w">W<sub>O</sub></span>`,
+                `Q: [B,8,T,64], K,V: [B,8,T,64]
+out: [B,T,512]`,
+                `att = (q @ k.transpose(-2,-1)) * scale
+att = att.masked_fill(mask, -inf)
+att = F.softmax(att, dim=-1)
+y = att @ v`
+            ),
+            'x-mlp': () => makeInfo(
+                'x (MLP input)',
+                'activation',
+                'LN₂ applied to post-attention residual.',
+                `<span class="a">x</span> = <span class="nl">LN₂</span>(<span class="a">x<sup>l-1</sup></span> + <span class="a">attn</span>)`,
+                `x: [B, T, 512]`,
+                `x = x + self.attn(self.ln_1(x))
+<span class="cm"># Now x includes attn</span>
+mlp_in = self.ln_2(x)`
+            ),
+            'W-up': () => makeInfo(
+                'W<sub>up</sub>',
+                'weight',
+                'Expands 4×. Creates space for nonlinearity.',
+                `<span class="a">h</span> = <span class="a">x</span> · <span class="w">W<sub>up</sub></span>`,
+                `W_up: [512, 2048]
+x: [B,T,512] → h: [B,T,2048]`,
+                `self.c_fc = nn.Linear(d_model, 4*d_model)
+h = self.c_fc(x)`
+            ),
+            'h-mlp': () => makeInfo(
+                'h (pre-GELU)',
+                'activation',
+                'Expanded hidden state before nonlinearity.',
+                `<span class="a">h</span> = <span class="a">x</span> · <span class="w">W<sub>up</sub></span>`,
+                `h: [B, T, 2048]`,
+                `h = self.c_fc(x)  <span class="cm"># [B,T,4*d_model]</span>`
+            ),
+            'gelu': () => makeInfo(
+                'GELU',
+                'nonlinear',
+                'Only MLP nonlinearity. Smooth activation.',
+                `<span class="nl">GELU</span>(<span class="a">x</span>) ≈ <span class="a">x</span> · σ(1.7·<span class="a">x</span>)`,
+                `[B, T, 2048] → [B, T, 2048]`,
+                `h = self.gelu(self.c_fc(x))
+<span class="cm"># or: F.gelu(h)</span>`
+            ),
+            'h-prime': () => makeInfo(
+                "h' (post-GELU)",
+                'activation',
+                'After nonlinearity. Some dims amplified/suppressed.',
+                `<span class="a">h'</span> = <span class="nl">GELU</span>(<span class="a">h</span>)`,
+                `h': [B, T, 2048]`,
+                `h = self.gelu(h)`
+            ),
+            'W-down': () => makeInfo(
+                'W<sub>down</sub>',
+                'weight',
+                'Contracts back to 512. Reads out patterns.',
+                `<span class="a">out</span> = <span class="a">h'</span> · <span class="w">W<sub>down</sub></span>`,
+                `W_down: [2048, 512]
+h': [B,T,2048] → out: [B,T,512]`,
+                `self.c_proj = nn.Linear(4*d_model, d_model)
+y = self.c_proj(h)`
+            ),
+            'mlp-out': () => makeInfo(
+                'MLP Output',
+                'activation',
+                'Final MLP output. Added to residual.',
+                `<span class="a">out</span> = <span class="nl">GELU</span>(<span class="a">x</span>·<span class="w">W<sub>up</sub></span>) · <span class="w">W<sub>down</sub></span>`,
+                `out: [B, T, 512]`,
+                `y = self.c_proj(self.gelu(self.c_fc(x)))
+y = self.dropout(y)
+<span class="cm">return</span> y`
+            ),
+            'mlp-block': () => makeInfo(
+                'MLP Block',
+                'nonlinear',
+                'Per-token: expand → GELU → contract.',
+                `<span class="a">MLP</span>(<span class="a">x</span>) = <span class="nl">GELU</span>(<span class="a">x</span><span class="w">W<sub>up</sub></span>) <span class="w">W<sub>down</sub></span>`,
+                `x: [B,T,512] → [B,T,2048] → [B,T,512]`,
+                `def forward(self, x):
+    h = self.c_fc(x)      <span class="cm"># up</span>
+    h = self.gelu(h)      <span class="cm"># nonlin</span>
+    h = self.c_proj(h)    <span class="cm"># down</span>
+    return self.dropout(h)`
+            ),
+            'logits': () => makeInfo(
+                'Logits z',
+                'activation',
+                'Final layer output projected to vocabulary. Unnormalized log-probs.',
+                `<span class="a">z</span> = <span class="a">x<sup>L</sup><sub>4</sub></span> · <span class="w">W<sub>E</sub><sup>T</sup></span>`,
+                `x: [512], W_E: [50257, 512]
+z: [50257]  <span class="cm"># vocab size</span>`,
+                `<span class="cm"># Unembedding (often tied weights)</span>
+logits = x @ self.lm_head.weight.T
+<span class="cm"># or: self.lm_head(x)</span>`
+            ),
+            'logits-small': () => makeInfo(
+                'Logits z',
+                'activation',
+                'Unnormalized scores for each vocabulary token.',
+                `<span class="a">z</span> ∈ ℝ<sup>|V|</sup>`,
+                `z: [50257]`,
+                `logits = self.lm_head(x)  <span class="cm"># [B,T,V]</span>`
+            ),
+            'softmax': () => makeInfo(
+                'Softmax',
+                'nonlinear',
+                'Converts logits to probability distribution over vocabulary.',
+                `<span class="a">p<sub>i</sub></span> = exp(<span class="a">z<sub>i</sub></span>) / Σ exp(<span class="a">z<sub>j</sub></span>)`,
+                `z: [50257] → p: [50257]
+Σ p_i = 1`,
+                `probs = F.softmax(logits, dim=-1)`
+            ),
+            'ce-loss': () => makeInfo(
+                'Cross-Entropy Loss',
+                'nonlinear',
+                'Negative log probability of correct token. Lower = better.',
+                `<span class="nl">ℒ</span> = −log <span class="a">p</span>[y] = −<span class="a">z<sub>y</sub></span> + log Σ exp(<span class="a">z<sub>j</sub></span>)`,
+                `p: [50257], y: scalar (token id)
+ℒ: scalar`,
+                `<span class="cm"># Combined softmax + NLL for stability</span>
+loss = F.cross_entropy(logits, targets)
+<span class="cm"># targets: [B, T] token indices</span>`
+            ),
+            'label-token': () => makeInfo(
+                'Label Token (y)',
+                'activation',
+                'Ground truth next token. The model learns to predict this.',
+                `y = token_id("sat") = 9338  <span class="cm"># example</span>`,
+                `y: scalar  <span class="cm"># index into vocab</span>
+targets: [B, T]  <span class="cm"># batched</span>`,
+                `<span class="cm"># Shifted by 1 from inputs</span>
+targets = input_ids[:, 1:]  <span class="cm"># next tokens</span>
+inputs = input_ids[:, :-1]`
+            ),
+            'loss-scalar': () => makeInfo(
+                'Loss ℒ',
+                'nonlinear',
+                'Scalar loss value. Backward pass computes ∂ℒ/∂θ for all params.',
+                `<span class="nl">ℒ</span> = −log p(y | x<sub>1:t</sub>)`,
+                `ℒ: scalar ∈ ℝ
+<span class="cm"># Typical range: 0.5 - 10+</span>`,
+                `loss = F.cross_entropy(logits.view(-1, V), 
+                       targets.view(-1))
+<span class="hl">loss.backward()</span>  <span class="cm"># computes all grads</span>`
+            ),
+            'history': () => makeInfo(
+                'History (K,V)',
+                'activation',
+                'All tokens t≤4 feed K and V. Q uses only t=4.',
+                `K, V computed from X = [<span class="a">x₁</span>,...,<span class="a">x₄</span>]`,
+                `X: [4, 512] or [B, T, 512]`,
+                `<span class="cm"># Causal: mask future positions</span>
+mask = torch.tril(ones(T,T))`
+            ),
+            'head': (el) => {
+                const i = parseInt(el.dataset.head) + 1;
+                return makeInfo(
+                    `Head ${i}`,
+                    'head',
+                    `Independent attention on dims [${(i-1)*64}:${i*64}]. Softmax is the nonlinearity.`,
+                    `<span class="h">α<sub>${i}</sub></span> = <span class="nl">softmax</span>(<span class="h">q<sub>${i}</sub></span>·<span class="h">K<sub>${i}</sub></span><sup>T</sup>/8)
+<span class="h">h<sub>${i}</sub></span> = <span class="h">α<sub>${i}</sub></span> · <span class="h">V<sub>${i}</sub></span>`,
+                    `q${i}: [64], K${i}: [4,64], V${i}: [4,64]
+α${i}: [4]  <span class="cm"># sums to 1</span>
+h${i}: [64]`,
+                    `<span class="cm"># Per head (dims ${(i-1)*64}:${i*64}):</span>
+att = q @ k.T / sqrt(64)
+att = softmax(att)
+out = att @ v`
+                );
+            }
+        };
+        
+        // Render info to sidebar
+        function renderInfo(data) {
+            let typeTag = '';
+            if (data.type === 'weight') typeTag = '<span class="sidebar-type weight">WEIGHT</span>';
+            else if (data.type === 'activation') typeTag = '<span class="sidebar-type activation">ACTIVATION</span>';
+            else if (data.type === 'head') typeTag = '<span class="sidebar-type head">HEAD</span>';
+            else if (data.type === 'nonlinear') typeTag = '<span class="sidebar-type nonlinear">NONLINEAR</span>';
+            else if (data.type === 'flow') typeTag = '<span class="sidebar-type flow">FLOW</span>';
+            
+            sidebarTitle.innerHTML = data.title + typeTag;
+            equationContent.innerHTML = `
+                <div class="sidebar-desc">${data.desc}</div>
+                <div class="sidebar-section eq">
+                    <div class="section-label">Equation</div>
+                    <div class="section-content">${data.eq}</div>
+                </div>
+                <div class="sidebar-section dim">
+                    <div class="section-label">Dimensions</div>
+                    <div class="section-content">${data.dim}</div>
+                </div>
+                <div class="sidebar-section code">
+                    <div class="section-label">Code (NanoGPT)</div>
+                    <div class="section-content">${data.code}</div>
+                </div>
+            `;
+        }
+        
+        // Generate head boxes with expandable details
+        for (let i = 0; i < 8; i++) {
+            const headBox = document.createElement('div');
+            headBox.className = 'head-box clickable';
+            headBox.dataset.info = 'head';
+            headBox.dataset.head = i;
+            headBox.innerHTML = `
+                <span class="head-tag">σ</span>
+                <div class="head-number">Head ${i + 1}</div>
+                <div class="head-slice">[${i*64}:${(i+1)*64}]</div>
+                <div class="head-output">→ h<sub>${i+1}</sub></div>
+                <div class="head-details">
+                    <div class="component-section">
+                        <div class="component-label">Inputs (64-dim slices)</div>
+                        <div class="matrix-flow">
+                            <div class="tensor-container"><span class="tensor-dim">[64]</span><div class="tensor-1d small">q${i+1}</div></div>
+                            <div class="tensor-container"><span class="tensor-dim">[4×64]</span><div class="tensor-2d small activation">K${i+1}</div></div>
+                            <div class="tensor-container"><span class="tensor-dim">[4×64]</span><div class="tensor-2d small activation">V${i+1}</div></div>
+                        </div>
+                    </div>
+                    <div class="component-section">
+                        <div class="component-label">Attention <span class="block-tag nonlinear">softmax</span></div>
+                        <div class="matrix-flow">
+                            <div class="tensor-container"><span class="tensor-dim">[64]</span><div class="tensor-1d small">q${i+1}</div></div>
+                            <span class="op-symbol">·</span>
+                            <div class="tensor-container"><span class="tensor-dim">[64×4]</span><div class="tensor-2d small activation">K${i+1}ᵀ</div></div>
+                            <span class="op-symbol">÷8</span>
+                            <span class="op-symbol nonlinear">σ</span>
+                            <span class="flow-arrow">→</span>
+                            <div class="tensor-container"><span class="tensor-dim">[4]</span><div class="tensor-1d small">α${i+1}</div></div>
+                        </div>
+                    </div>
+                    <div class="component-section">
+                        <div class="component-label">Output (weighted sum)</div>
+                        <div class="matrix-flow">
+                            <div class="tensor-container"><span class="tensor-dim">[4]</span><div class="tensor-1d small">α${i+1}</div></div>
+                            <span class="op-symbol">·</span>
+                            <div class="tensor-container"><span class="tensor-dim">[4×64]</span><div class="tensor-2d small activation">V${i+1}</div></div>
+                            <span class="flow-arrow">→</span>
+                            <div class="tensor-container"><span class="tensor-dim">[64]</span><div class="tensor-1d small">h${i+1}</div></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            headBox.addEventListener('click', (e) => {
+                if (document.body.classList.contains('simple-mode')) return;
+
+                e.stopPropagation();
+                const wasExpanded = headBox.classList.contains('expanded');
+                document.querySelectorAll('.head-box').forEach(h => h.classList.remove('expanded'));
+                if (!wasExpanded) headBox.classList.add('expanded');
+
+                document.querySelectorAll('.clickable.selected').forEach(s => s.classList.remove('selected'));
+                headBox.classList.add('selected');
+
+                // Use current data-info attribute (swaps between 'head' and 'grad-head')
+                const infoKey = headBox.dataset.info;
+                const data = infoData[infoKey](headBox);
+                renderInfo(data);
+            });
+            
+            headsGrid.appendChild(headBox);
+        }
+
+        // Gradient head boxes removed - using data-info swapping instead
+
+        // Click handler for all other clickable elements
+        document.querySelectorAll('.clickable').forEach(el => {
+            if (el.dataset.info === 'head') return;
+            
+            el.addEventListener('click', (e) => {
+                if (document.body.classList.contains('simple-mode')) return;
+                
+                e.stopPropagation();
+                document.querySelectorAll('.clickable.selected').forEach(s => s.classList.remove('selected'));
+                el.classList.add('selected');
+                
+                const infoKey = el.dataset.info;
+                if (infoKey && infoData[infoKey]) {
+                    const data = typeof infoData[infoKey] === 'function' ? infoData[infoKey](el) : infoData[infoKey];
+                    renderInfo(data);
+                }
+            });
+        });
+        
+        // Draw SVG arrows
+        function drawArrows() {
+            const splitSvg = document.getElementById('split-svg');
+            const concatSvg = document.getElementById('concat-svg');
+            if (!splitSvg || !concatSvg) return;
+            
+            splitSvg.innerHTML = '';
+            concatSvg.innerHTML = '';
+            
+            const w = splitSvg.parentElement.offsetWidth;
+            const h = 40;
+            const qX = w * 0.2, kX = w * 0.5, vX = w * 0.8;
+            
+            const heads = [];
+            const gw = w * 0.9, gx = w * 0.05;
+            for (let c = 0; c < 4; c++) heads.push(gx + (c + 0.5) * (gw / 4));
+            for (let c = 0; c < 4; c++) heads.push(gx + (c + 0.5) * (gw / 4));
+            
+            for (let i = 0; i < 8; i++) {
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', `M ${qX} 5 Q ${qX} 20, ${heads[i]} 35`);
+                path.setAttribute('class', 'split-arrow-line');
+                path.style.opacity = 0.5;
+                splitSvg.appendChild(path);
+            }
+            
+            [kX, vX].forEach(sx => {
+                for (let i = 0; i < 8; i++) {
+                    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    path.setAttribute('d', `M ${sx} 5 Q ${sx} 20, ${heads[i]} 35`);
+                    path.setAttribute('class', 'split-arrow-line');
+                    path.style.opacity = 0.15;
+                    path.style.strokeDasharray = '2,2';
+                    splitSvg.appendChild(path);
+                }
+            });
+            
+            const ox = w / 2;
+            for (let i = 0; i < 8; i++) {
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', `M ${heads[i]} 5 Q ${heads[i]} 18, ${ox} 30`);
+                path.setAttribute('class', 'split-arrow-line');
+                path.style.opacity = 0.4;
+                concatSvg.appendChild(path);
+            }
+        }
+        
+        drawArrows();
+        window.addEventListener('resize', drawArrows);
+    </script>
+</body>
+</html>
